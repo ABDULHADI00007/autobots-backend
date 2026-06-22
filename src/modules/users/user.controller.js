@@ -1,5 +1,5 @@
-import { profileUpdateSchema, roleUpdateSchema } from "./user.validation.js";
-import { getProfile, updateProfile, updateRole } from "./user.service.js";
+import { profileUpdateSchema } from "./user.validation.js";
+import { getProfile, updateProfile } from "./user.service.js";
 import { successResponse, errorResponse } from "../../utils/ApiResponse.js";
 
 export const getProfileController = async (req, res) => {
@@ -22,19 +22,5 @@ export const updateProfileController = async (req, res) => {
     }
 
     return errorResponse(res, error.message || "Failed to update profile", 400);
-  }
-};
-
-export const updateRoleController = async (req, res) => {
-  try {
-    const validatedData = roleUpdateSchema.parse(req.body);
-    const user = await updateRole(req.user.userId, validatedData.role);
-    return successResponse(res, "Role updated successfully", user, 200);
-  } catch (error) {
-    if (error.name === "ZodError") {
-      return errorResponse(res, error.issues[0]?.message || "Validation failed", 400);
-    }
-
-    return errorResponse(res, error.message || "Failed to update role", 400);
   }
 };

@@ -8,8 +8,13 @@ import orderRoutes from "../modules/orders/order.routes.js";
 import reviewRoutes from "../modules/reviews/review.routes.js";
 import refundRoutes from "../modules/refunds/refund.routes.js";
 import dashboardRoutes from "../modules/dashboard/dashboard.routes.js";
+import disputeRoutes from "../modules/disputes/dispute.routes.js";
+import attachmentRoutes from "../modules/attachments/attachment.routes.js";
+import messageRoutes from "../modules/messages/conversation.routes.js";
+import deliveryRoutes from "../modules/deliveries/delivery.routes.js";
 
 const router = Router();
+
 
 router.use("/auth", authRoutes);
 router.use("/users", userRoutes);
@@ -20,5 +25,11 @@ router.use("/orders", orderRoutes);
 router.use("/reviews", reviewRoutes);
 router.use("/refunds", refundRoutes);
 router.use("/dashboard", dashboardRoutes);
+router.use("/disputes", disputeRoutes);
+router.use("/attachments", attachmentRoutes);
+router.use("/messages", messageRoutes);
+router.use("/", deliveryRoutes);
 
 export default router;
+
+

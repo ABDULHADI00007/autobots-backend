@@ -24,8 +24,8 @@ const orderSchema = new mongoose.Schema(
     },
     paymentStatus: {
       type: String,
-      enum: ["pending", "paid", "failed", "refunded"],
-      default: "pending",
+      enum: ["held", "released", "refunded"],
+      default: "held",
     },
     stripeSessionId: {
       type: String,
@@ -37,7 +37,7 @@ const orderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "accepted", "completed", "cancelled"],
+      enum: ["pending", "accepted", "delivered", "revision_requested", "completed", "cancelled", "disputed"],
       default: "pending",
     },
     notes: {
@@ -45,8 +45,94 @@ const orderSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    // Escrow flow fields
+    deliveredAt: {
+      type: Date,
+    },
+    completedAt: {
+      type: Date,
+    },
+    reviewDeadline: {
+      type: Date,
+    },
+    disputeOpenedAt: {
+      type: Date,
+    },
+    adminDecisionAt: {
+      type: Date,
+    },
+    deliveryNotes: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    maxRevisions: {
+      type: Number,
+      default: 3,
+    },
+    revisionCount: {
+      type: Number,
+      default: 0,
+    },
+    revisionHistory: [
+      {
+        revisionNumber: {
+          type: Number,
+        },
+        requestedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+        message: {
+          type: String,
+          trim: true,
+          default: "",
+        },
+        status: {
+          type: String,
+          enum: ["requested", "resolved"],
+          default: "requested",
+        },
+        requestedAt: {
+          type: Date,
+        },
+        resolvedAt: {
+          type: Date,
+        },
+        sellerResponse: {
+          type: String,
+          trim: true,
+          default: "",
+        },
+        deliveryNotes: {
+          type: String,
+          trim: true,
+          default: "",
+        },
+      },
+    ],
   },
   { timestamps: true }
+);
+
+orderSchema.index(
+  { stripeSessionId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      stripeSessionId: { $type: "string", $ne: "" },
+    },
+  }
+);
+
+orderSchema.index(
+  { stripePaymentIntentId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      stripePaymentIntentId: { $type: "string", $ne: "" },
+    },
+  }
 );
 
 const Order = mongoose.model("Order", orderSchema);

@@ -1,6 +1,8 @@
 import { registerSchema, loginSchema } from "./auth.validation.js";
 import { registerUser, loginUser, getCurrentUser } from "./auth.service.js";
 import { successResponse, errorResponse } from "../../utils/ApiResponse.js";
+import User from "../users/user.model.js";
+import generateToken from "../../utils/generateToken.js";
 
 export const register = async (req, res) => {
   try {
@@ -39,5 +41,20 @@ export const me = async (req, res) => {
     return successResponse(res, "User profile fetched successfully", user, 200);
   } catch (error) {
     return errorResponse(res, error.message || "Failed to fetch user profile", 404);
+  }
+};
+
+export const refreshToken = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select("-password");
+    if (!user) return errorResponse(res, "User not found", 404);
+
+    const token = generateToken(user);
+    return successResponse(res, "Token refreshed", {
+      token,
+      user: { id: user._id, name: user.name, email: user.email, role: user.role, createdAt: user.createdAt },
+    });
+  } catch (error) {
+    return errorResponse(res, error.message || "Token refresh failed", 400);
   }
 };

@@ -1,17 +1,76 @@
 import express from "express";
-import cors from "cors";
+import path from "path";
+import { helmetConfig } from "./middleware/helmet.middleware.js";
+import { corsConfig } from "./middleware/cors.middleware.js";
+import { apiLimiter, readLimiter, loginLimiter, registerLimiter } from "./middleware/rateLimit.middleware.js";
+import { notFoundHandler, errorHandler } from "./middleware/error.middleware.js";
 import routes from "./routes/index.js";
 import { stripeWebhook } from "./modules/orders/order.controller.js";
 
 const app = express();
 
-app.use(cors());
+// ============================================================
+// SECURITY MIDDLEWARE
+// ============================================================
 
-// Webhook — raw body required, must be before express.json()
+// Helmet - Set security HTTP headers
+app.use(helmetConfig);
+
+// Trust proxy - Required when deployed behind a reverse proxy (load balancer)
+app.set("trust proxy", 1);
+
+// CORS - Cross-Origin Resource Sharing
+app.use(corsConfig);
+
+// ============================================================
+// WEBHOOK HANDLING (before JSON parsing)
+// ============================================================
+// Stripe webhook requires raw body, must be before express.json()
 app.post("/api/orders/webhook", express.raw({ type: "application/json" }), stripeWebhook);
 
-app.use(express.json());
+// ============================================================
+// BODY PARSING
+// ============================================================
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
+app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads")));
+
+// ============================================================
+// RATE LIMITING
+// ============================================================
+// Relaxed limiter for public read-only endpoints (disabled in development)
+app.use("/api/listings",   readLimiter);
+app.use("/api/categories", readLimiter);
+app.use("/api/auth/me",    readLimiter);
+
+// General limiter for all other API routes (disabled in development)
+app.use("/api", apiLimiter);
+
+// Strict limiters for auth write endpoints (always active)
+app.use("/api/auth/login",    loginLimiter);
+app.use("/api/auth/register", registerLimiter);
+
+// ============================================================
+// ROUTES
+// ============================================================
 app.use("/api", routes);
+
+// ============================================================
+// HEALTH CHECK ENDPOINT
+// ============================================================
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "OK", timestamp: new Date().toISOString() });
+});
+
+// ============================================================
+// ERROR HANDLING
+// ============================================================
+
+// 404 Not Found handler - must be after all routes
+app.use(notFoundHandler);
+
+// Global error handler - must be last
+app.use(errorHandler);
 
 export default app;

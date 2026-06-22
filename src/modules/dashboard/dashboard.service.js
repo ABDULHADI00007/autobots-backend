@@ -4,6 +4,7 @@ import Listing from "../listings/listing.model.js";
 import Order from "../orders/order.model.js";
 import Review from "../reviews/review.model.js";
 import Refund from "../refunds/refund.model.js";
+import Dispute from "../disputes/dispute.model.js";
 
 export const getOverview = async () => {
   const [totalUsers, totalSellers, totalListings, totalOrders, totalReviews, totalRefunds] = await Promise.all([
@@ -15,35 +16,63 @@ export const getOverview = async () => {
     Refund.countDocuments(),
   ]);
 
-  return { totalUsers, totalSellers, totalListings, totalOrders, totalReviews, totalRefunds };
+  // Escrow-related stats
+  const [totalHeldFundsResult, totalReleasedFundsResult, totalRefundedFundsResult, openDisputes, resolvedDisputes, disputedOrders] = await Promise.all([
+    Order.aggregate([{ $match: { paymentStatus: "held" } }, { $group: { _id: null, total: { $sum: "$amount" } } }]),
+    Order.aggregate([{ $match: { paymentStatus: "released" } }, { $group: { _id: null, total: { $sum: "$amount" } } }]),
+    Order.aggregate([{ $match: { paymentStatus: "refunded" } }, { $group: { _id: null, total: { $sum: "$amount" } } }]),
+    Dispute.countDocuments({ status: "open" }),
+    Dispute.countDocuments({ status: "resolved" }),
+    Order.countDocuments({ status: "disputed" }),
+  ]);
+
+  const totalHeldFunds = totalHeldFundsResult.length ? parseFloat(totalHeldFundsResult[0].total.toFixed(2)) : 0;
+  const totalReleasedFunds = totalReleasedFundsResult.length ? parseFloat(totalReleasedFundsResult[0].total.toFixed(2)) : 0;
+  const totalRefundedFunds = totalRefundedFundsResult.length ? parseFloat(totalRefundedFundsResult[0].total.toFixed(2)) : 0;
+
+  return {
+    totalUsers,
+    totalSellers,
+    totalListings,
+    totalOrders,
+    totalReviews,
+    totalRefunds,
+    totalHeldFunds,
+    totalReleasedFunds,
+    totalRefundedFunds,
+    openDisputes,
+    resolvedDisputes,
+    disputedOrders,
+  };
 };
 
 export const getRevenue = async () => {
-  const [revenueResult, paidOrders, refundedOrders] = await Promise.all([
+  const [revenueResult, releasedOrders, refundedOrders] = await Promise.all([
     Order.aggregate([
-      { $match: { paymentStatus: "paid" } },
+      { $match: { paymentStatus: "released" } },
       { $group: { _id: null, totalRevenue: { $sum: "$amount" } } },
     ]),
-    Order.countDocuments({ paymentStatus: "paid" }),
+    Order.countDocuments({ paymentStatus: "released" }),
     Order.countDocuments({ paymentStatus: "refunded" }),
   ]);
 
   return {
     totalRevenue: revenueResult.length ? parseFloat(revenueResult[0].totalRevenue.toFixed(2)) : 0,
-    paidOrders,
+    releasedOrders,
     refundedOrders,
   };
 };
 
 export const getOrderStats = async () => {
-  const [pending, accepted, completed, cancelled] = await Promise.all([
+  const [pending, accepted, completed, cancelled, disputed] = await Promise.all([
     Order.countDocuments({ status: "pending" }),
     Order.countDocuments({ status: "accepted" }),
     Order.countDocuments({ status: "completed" }),
     Order.countDocuments({ status: "cancelled" }),
+    Order.countDocuments({ status: "disputed" }),
   ]);
 
-  return { pending, accepted, completed, cancelled };
+  return { pending, accepted, completed, cancelled, disputed };
 };
 
 export const getListingStats = async () => {

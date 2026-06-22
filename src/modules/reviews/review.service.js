@@ -18,7 +18,7 @@ export const createReview = async (buyerId, { orderId, rating, comment }) => {
   const order = await Order.findById(orderId);
   if (!order) throw new Error("Order not found");
   if (order.buyerId.toString() !== buyerId) throw new Error("Access denied");
-  if (order.paymentStatus !== "paid") throw new Error("Only paid orders can be reviewed");
+  if (order.paymentStatus !== "released") throw new Error("Only released orders can be reviewed");
   if (order.status !== "completed") throw new Error("Only completed orders can be reviewed");
 
   const existing = await Review.findOne({ orderId });

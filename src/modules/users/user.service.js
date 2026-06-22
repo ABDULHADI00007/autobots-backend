@@ -22,20 +22,3 @@ export const updateProfile = async (userId, data) => {
 
   return await User.findById(userId).select("-password");
 };
-
-export const updateRole = async (userId, role) => {
-  if (role === "admin") {
-    throw new Error("Admin role cannot be assigned by yourself");
-  }
-
-  const user = await User.findById(userId);
-
-  if (!user) {
-    throw new Error("User not found");
-  }
-
-  user.role = role;
-  await user.save();
-
-  return await User.findById(userId).select("-password");
-};
