@@ -31,8 +31,15 @@ app.post("/api/orders/webhook", express.raw({ type: "application/json" }), strip
 // ============================================================
 // BODY PARSING
 // ============================================================
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
+// Large limit only for attachment uploads (base64 files). All other routes use 1mb.
+app.use((req, res, next) => {
+  if (req.method === "POST" && req.path === "/api/attachments") {
+    express.json({ limit: "50mb" })(req, res, next);
+  } else {
+    express.json({ limit: "1mb" })(req, res, next);
+  }
+});
+app.use(express.urlencoded({ limit: "1mb", extended: true }));
 
 app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads")));
 

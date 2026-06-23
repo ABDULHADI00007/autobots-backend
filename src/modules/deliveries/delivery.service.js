@@ -96,6 +96,12 @@ export async function createOrderDelivery({ orderId, submittedBy, role, summaryN
 
   assertSellerCanAccess({ order, userId: submittedBy, role });
 
+  if (!order) throw new Error("Order not found");
+  const deliverableStatuses = ["accepted", "revision_requested"];
+  if (!deliverableStatuses.includes(order.status)) {
+    throw new Error(`Delivery cannot be submitted. Order status is "${order.status}". Only accepted or revision-requested orders can receive deliveries.`);
+  }
+
   const { deliveries: existingDeliveries, latest } = await getLatestDelivery(orderId);
   const version = (latest?.version ?? 0) + 1;
   const revisionNumber = order.revisionCount ?? order.revisionHistory?.length ?? 0;
@@ -140,20 +146,24 @@ export async function createOrderDelivery({ orderId, submittedBy, role, summaryN
   await order.save();
 
   // Timeline integration (Deliverables system only records events)
-  await createTimeline({
-    scopeType: "order",
-    scopeId: orderId,
-    actorId: submittedBy,
-    eventType: "DeliverySubmitted",
-    title: "Delivery submitted",
-    description: "Seller submitted a deliverable version.",
-    visibility: "participants",
-    payload: {
-      deliveryId: created._id,
-      version: created.version,
-      revisionNumber: created.revisionNumber,
-    },
-  });
+  try {
+    await createTimeline({
+      scopeType: "order",
+      scopeId: orderId,
+      actorId: submittedBy,
+      eventType: "DeliverySubmitted",
+      title: "Delivery submitted",
+      description: "Seller submitted a deliverable version.",
+      visibility: "participants",
+      payload: {
+        deliveryId: created._id,
+        version: created.version,
+        revisionNumber: created.revisionNumber,
+      },
+    });
+  } catch (err) {
+    console.warn("Delivery timeline event failed", err);
+  }
 
   return {
     delivery: created,

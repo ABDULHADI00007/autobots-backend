@@ -110,18 +110,18 @@ const loadConversationForUser = async (conversationId, user) => {
   }
 
   const allowedAsAdmin = user.role === "admin";
-  const participant = await getParticipantRecord(conversation._id, user.userId);
+  let participant = await getParticipantRecord(conversation._id, user.userId);
 
   if (!allowedAsAdmin && !participant) {
     throw new Error("Access denied");
   }
 
-  if (allowedAsAdmin && conversation.conversationType === "dispute") {
+  if (allowedAsAdmin && !participant) {
     await getOrCreateParticipant(conversation, user, true);
+    participant = await getParticipantRecord(conversation._id, user.userId);
   }
 
-  const resolvedParticipant = await getParticipantRecord(conversation._id, user.userId);
-  const unreadCount = resolvedParticipant ? await buildUnreadCount(conversation._id, resolvedParticipant, user.userId) : 0;
+  const unreadCount = participant ? await buildUnreadCount(conversation._id, participant, user.userId) : 0;
   const participants = await ConversationParticipant.find({ conversationId: conversation._id })
     .populate("userId", "name email role")
     .sort({ createdAt: 1 });
@@ -132,7 +132,7 @@ const loadConversationForUser = async (conversationId, user) => {
     participants,
     messages,
     unreadState: {
-      lastReadAt: resolvedParticipant?.lastReadAt || null,
+      lastReadAt: participant?.lastReadAt || null,
       unreadCount,
     },
   };
@@ -308,31 +308,33 @@ export const sendMessage = async (conversationId, userId, userRole, body, type =
   }
 
   let participant = await ConversationParticipant.findOne({ conversationId: conversation._id, userId });
+  if (!participant && userRole === "admin") {
+    participant = await getOrCreateParticipant(conversation, { userId, role: userRole }, true);
+  }
+
   if (!participant) {
     throw new Error("Access denied");
   }
+
+  const safeBody = typeof body === "string" ? body : String(body || "");
 
   const message = await Message.create({
     conversationId: conversation._id,
     senderId: userId,
     senderRole: userRole,
     type,
-    body,
+    body: safeBody,
     metadata: {},
     replyToMessageId: null,
     visibility: participant ? "participants" : "admin",
   });
 
   conversation.lastMessageAt = message.createdAt;
-  conversation.lastMessagePreview = body.slice(0, 140);
+  conversation.lastMessagePreview = safeBody.slice(0, 140);
   await conversation.save();
 
-  if (participant) {
-    await ConversationParticipant.updateOne(
-      { _id: participant._id },
-      { $set: { lastReadAt: participant.lastReadAt || null } }
-    );
-  }
+  participant.lastReadAt = message.createdAt;
+  await participant.save();
 
   return message;
 };
@@ -348,6 +350,10 @@ export const markConversationRead = async (conversationId, userId, userRole) => 
   }
 
   let participant = await ConversationParticipant.findOne({ conversationId: conversation._id, userId });
+  if (!participant && userRole === "admin") {
+    participant = await getOrCreateParticipant(conversation, { userId, role: userRole }, true);
+  }
+
   if (!participant) {
     throw new Error("Access denied");
   }

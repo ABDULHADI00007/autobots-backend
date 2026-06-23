@@ -1,4 +1,4 @@
-import { createDisputeSchema, adminResolveSchema } from "./dispute.validation.js";
+import { createDisputeSchema, adminResolveSchema, adminResolutionSchema } from "./dispute.validation.js";
 import * as disputeService from "./dispute.service.js";
 import { successResponse, errorResponse } from "../../utils/ApiResponse.js";
 
@@ -39,10 +39,32 @@ export const getAllDisputesController = async (req, res) => {
 export const resolveDisputeController = async (req, res) => {
   try {
     const data = adminResolveSchema.parse(req.body);
-    const dispute = await disputeService.resolveDispute(req.params.id, data.decision, data.adminNotes || "");
+    const dispute = await disputeService.resolveDispute(
+      req.params.id,
+      data.decision,
+      data.adminNotes || "",
+      req.user.userId
+    );
     return successResponse(res, "Dispute resolved", dispute, 200);
   } catch (err) {
     if (err.name === "ZodError") return errorResponse(res, err.issues[0]?.message || "Validation failed", 400);
     return errorResponse(res, err.message, 400);
+  }
+};
+
+export const resolveDisputeFinalController = async (req, res) => {
+  try {
+    const data = adminResolutionSchema.parse(req.body);
+    const dispute = await disputeService.resolveDisputeFinal(
+      req.params.id,
+      data.decision,
+      data.notes,
+      req.user.userId
+    );
+    return successResponse(res, "Dispute resolved", dispute, 200);
+  } catch (err) {
+    if (err.name === "ZodError") return errorResponse(res, err.issues[0]?.message || "Validation failed", 400);
+    const status = err.message === "Dispute already resolved" ? 409 : 400;
+    return errorResponse(res, err.message, status);
   }
 };

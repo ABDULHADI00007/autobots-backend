@@ -6,6 +6,7 @@ import {
   getMyDisputesController,
   getAllDisputesController,
   resolveDisputeController,
+  resolveDisputeFinalController,
 } from "./dispute.controller.js";
 
 const router = Router();
@@ -14,5 +15,6 @@ router.post("/", authMiddleware, roleMiddleware("buyer", "seller"), createDisput
 router.get("/my", authMiddleware, getMyDisputesController);
 router.get("/admin/all", authMiddleware, roleMiddleware("admin"), getAllDisputesController);
 router.put("/:id/resolve", authMiddleware, roleMiddleware("admin"), resolveDisputeController);
+router.post("/:id/resolve", authMiddleware, roleMiddleware("admin"), resolveDisputeFinalController);
 
 export default router;

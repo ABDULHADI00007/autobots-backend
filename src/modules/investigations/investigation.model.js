@@ -12,6 +12,7 @@ const investigationSchema = new mongoose.Schema(
       type: String,
       trim: true,
       required: true,
+      enum: ["open", "under_review", "waiting_buyer", "waiting_seller", "evidence_review", "ready_for_decision", "closed"],
       default: "open",
     },
     assignedAdminId: {
@@ -22,6 +23,7 @@ const investigationSchema = new mongoose.Schema(
     priority: {
       type: String,
       trim: true,
+      enum: ["low", "medium", "high", "urgent"],
       default: "medium",
     },
     summary: {

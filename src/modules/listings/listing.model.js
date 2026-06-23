@@ -89,8 +89,17 @@ const listingSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "approved", "rejected"],
+      enum: ["pending", "approved", "rejected", "changes_requested", "hidden"],
       default: "pending",
+    },
+    moderationFeedback: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    moderationUpdatedAt: {
+      type: Date,
+      default: null,
     },
     averageRating: {
       type: Number,

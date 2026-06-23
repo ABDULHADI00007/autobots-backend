@@ -1,0 +1,9 @@
+git init
+git add.
+git commit -m "initial commit"
+git remote add origin https://github.com/USERNAME/ai-marketplace-backend.git
+jo repo ka url hon ga wo copy hon ga
+agr run nahi hon tu 
+git branch -M main
+git push -u origin main
+

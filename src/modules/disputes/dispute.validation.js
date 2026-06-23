@@ -9,3 +9,8 @@ export const adminResolveSchema = z.object({
   decision: z.enum(["release", "refund"], { errorMap: () => ({ message: "Decision must be release or refund" }) }),
   adminNotes: z.string().trim().optional(),
 });
+
+export const adminResolutionSchema = z.object({
+  decision: z.enum(["buyer_wins", "seller_wins"], { errorMap: () => ({ message: "Decision must be buyer_wins or seller_wins" }) }),
+  notes: z.string().trim().min(1, "Resolution notes are required"),
+});

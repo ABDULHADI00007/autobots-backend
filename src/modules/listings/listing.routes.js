@@ -11,6 +11,9 @@ import {
   getAllListingsForAdminController,
   approveListingController,
   rejectListingController,
+  requestChangesListingController,
+  hideListingController,
+  unhideListingController,
 } from "./listing.controller.js";
 
 const router = Router();
@@ -26,6 +29,9 @@ router.delete("/:id", authMiddleware, roleMiddleware("seller"), deleteListingCon
 
 router.put("/:id/approve", authMiddleware, roleMiddleware("admin"), approveListingController);
 router.put("/:id/reject", authMiddleware, roleMiddleware("admin"), rejectListingController);
+router.put("/:id/request-changes", authMiddleware, roleMiddleware("admin"), requestChangesListingController);
+router.put("/:id/hide", authMiddleware, roleMiddleware("admin"), hideListingController);
+router.put("/:id/unhide", authMiddleware, roleMiddleware("admin"), unhideListingController);
 
 router.get("/:slug", getListingBySlugController);
 

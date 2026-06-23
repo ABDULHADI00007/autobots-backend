@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import { createHash } from "crypto";
-import { mkdir, unlink, writeFile } from "fs/promises";
+import { access, mkdir, unlink, writeFile } from "fs/promises";
 import path from "path";
 import Attachment from "./attachment.model.js";
 import Message from "../conversations/message.model.js";
@@ -8,6 +8,7 @@ import ConversationParticipant from "../conversations/conversationParticipant.mo
 import Delivery from "../deliveries/delivery.model.js";
 import Order from "../orders/order.model.js";
 import Investigation from "../investigations/investigation.model.js";
+import Evidence from "../evidence/evidence.model.js";
 import Dispute from "../disputes/dispute.model.js";
 
 export const ATTACHMENT_SIZE_LIMITS = {
@@ -62,6 +63,42 @@ function resolveSizeLimit(kind, mimeType) {
   if (ARCHIVE_MIME_TYPES.includes(mimeType)) return ATTACHMENT_SIZE_LIMITS.archive;
   if (VIDEO_MIME_TYPES.includes(mimeType)) return ATTACHMENT_SIZE_LIMITS.video;
   return null;
+}
+
+function isTextBuffer(buffer) {
+  if (!buffer || buffer.length === 0) return false;
+
+  const sample = buffer.slice(0, 512);
+  for (const byte of sample) {
+    if (byte === 0) return false;
+  }
+
+  return true;
+}
+
+function detectMimeType(buffer) {
+  if (!buffer || buffer.length < 4) return null;
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg";
+  if (buffer.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WEBP") return "image/webp";
+  if (buffer.slice(0, 5).toString("ascii") === "%PDF-") return "application/pdf";
+  if (buffer.slice(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))) return "application/zip";
+  if (buffer.length >= 12 && buffer.slice(4, 8).toString("ascii") === "ftyp") return "video/mp4";
+  if (isTextBuffer(buffer)) return "text/plain";
+  return null;
+}
+
+function mimeTypesMatch(declaredMimeType, actualMimeType) {
+  if (declaredMimeType === actualMimeType) return true;
+  if (declaredMimeType.startsWith("image/") && actualMimeType.startsWith("image/")) return true;
+
+  const equivalent = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ["application/zip"],
+    "application/msword": ["application/zip"],
+    "application/zip": ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword"],
+  };
+
+  return equivalent[declaredMimeType]?.includes(actualMimeType) ?? false;
 }
 
 function sanitizeFileName(fileName) {
@@ -137,15 +174,20 @@ async function canAccessDeliveryAttachment(parentId, userId) {
   return isOrderParticipant(order, userId);
 }
 
-async function canAccessEvidenceAttachment(parentId, userId) {
-  const investigation = await Investigation.findById(parentId).select("disputeId");
-  if (investigation) {
-    const dispute = await Dispute.findById(investigation.disputeId).select("orderId");
+async function canAccessEvidenceAttachment(parentId, userId, role) {
+  // parentId may be an evidenceId (after re-parenting) or a disputeId (pre-creation)
+  const evidence = await (await import("../evidence/evidence.model.js")).default.findById(parentId).select("disputeId visibility attachmentIds");
+  if (evidence) {
+    // Non-admins cannot access attachments belonging to admin-only or internal-only evidence
+    if (role !== "admin" && evidence.visibility !== "participant-visible") return false;
+
+    const dispute = await Dispute.findById(evidence.disputeId).select("orderId");
     if (!dispute) return false;
     const order = await Order.findById(dispute.orderId).select("buyerId sellerId");
     return isOrderParticipant(order, userId);
   }
 
+  // Fallback: parentId is a disputeId (attachment not yet re-parented to an evidence doc)
   const dispute = await Dispute.findById(parentId).select("orderId");
   if (!dispute) return false;
   const order = await Order.findById(dispute.orderId).select("buyerId sellerId");
@@ -168,7 +210,7 @@ async function canAccessAttachment(attachment, userId, role) {
   }
 
   if (attachment.parentType === "evidence") {
-    return canAccessEvidenceAttachment(attachment.parentId, userId);
+    return canAccessEvidenceAttachment(attachment.parentId, userId, role);
   }
 
   return false;
@@ -191,7 +233,23 @@ async function assertParentAccess(parentType, parentId, userId, role) {
   }
 
   if (parentType === "evidence") {
-    const allowed = await canAccessEvidenceAttachment(parentId, userId);
+    // Verify the parentId is a valid dispute (pre-evidence-creation upload) or evidence document.
+    // Block uploads if the dispute is already resolved for either case.
+    const evidenceDoc = await Evidence.findById(parentId).select("disputeId");
+    if (evidenceDoc) {
+      const resolvedDispute = await Dispute.findById(evidenceDoc.disputeId).select("status");
+      if (resolvedDispute?.status === "resolved") {
+        throw new Error("Cannot upload attachments to evidence in a resolved dispute");
+      }
+    } else {
+      const disputeDoc = await Dispute.findById(parentId).select("orderId status");
+      const isDisputeId = Boolean(disputeDoc);
+      if (isDisputeId && disputeDoc.status === "resolved") {
+        throw new Error("Cannot upload evidence to a resolved dispute");
+      }
+    }
+
+    const allowed = await canAccessEvidenceAttachment(parentId, userId, role);
     if (!allowed) throw new Error("Access denied");
     return;
   }
@@ -264,31 +322,61 @@ export async function createAttachment({
       throw new Error("Checksum mismatch");
     }
 
+    const actualMimeType = detectMimeType(contentBuffer);
+    if (!actualMimeType) {
+      throw new Error("Unable to verify uploaded file type");
+    }
+
+    if (!mimeTypesMatch(mimeType, actualMimeType)) {
+      throw new Error("Declared MIME type does not match file content");
+    }
+
     await ensureStorageDir();
     const safeName = sanitizeFileName(fileName);
     const extension = path.extname(safeName);
     storageKey = `${computedChecksum}${extension || ""}`;
     const storagePath = path.join(ATTACHMENT_STORAGE_ROOT, storageKey);
-    await writeFile(storagePath, contentBuffer);
-    url = `/uploads/attachments/${storageKey}`;
+    const existingFile = await access(storagePath).then(() => true).catch(() => false);
+    let wroteNewFile = false;
+
+    try {
+      if (!existingFile) {
+        await writeFile(storagePath, contentBuffer);
+        wroteNewFile = true;
+      }
+      url = `/uploads/attachments/${storageKey}`;
+    } catch (err) {
+      if (wroteNewFile) {
+        await unlink(storagePath).catch(() => {});
+      }
+      throw err;
+    }
+
+    let attachment;
+    try {
+      attachment = await Attachment.create({
+        parentType,
+        parentId,
+        uploaderId,
+        fileName,
+        mimeType,
+        sizeBytes,
+        checksum,
+        storageKey,
+        url,
+        storageProvider,
+        visibility: visibility || "participants",
+        kind: normalizedKind,
+      });
+    } catch (err) {
+      if (wroteNewFile) {
+        await unlink(storagePath).catch(() => {});
+      }
+      throw err;
+    }
+
+    return toAttachmentPayload(attachment);
   }
-
-  const attachment = await Attachment.create({
-    parentType,
-    parentId,
-    uploaderId,
-    fileName,
-    mimeType,
-    sizeBytes,
-    checksum,
-    storageKey,
-    url,
-    storageProvider,
-    visibility: visibility || "participants",
-    kind: normalizedKind,
-  });
-
-  return toAttachmentPayload(attachment);
 }
 
 export async function getAttachment(attachmentId, userId, role) {
@@ -317,6 +405,7 @@ export async function listAttachments({ userId, role, parentType, parentId, uplo
     await assertParentAccess(parentType, parentId, userId, role);
   } else {
     query.uploaderId = userId;
+    if (parentType) query.parentType = parentType;
   }
 
   const attachments = await Attachment.find(query).sort({ createdAt: -1 });

@@ -28,6 +28,10 @@ export const listingCreateSchema = z.object({
 
 export const listingUpdateSchema = listingCreateSchema.partial();
 
+export const listingModerationSchema = z.object({
+  feedback: z.string().trim().optional().default(""),
+});
+
 export const listingIdParamSchema = z.object({
   id: objectId,
 });

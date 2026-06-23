@@ -45,6 +45,21 @@ const disputeSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    resolutionDecision: {
+      type: String,
+      enum: ["buyer_wins", "seller_wins"],
+      default: null,
+    },
+    resolvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    resolutionNotes: {
+      type: String,
+      trim: true,
+      default: "",
+    },
   },
   { timestamps: true }
 );

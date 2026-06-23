@@ -63,6 +63,23 @@ const getListingOwnedBySeller = async (listingId, sellerId) => {
   return listing;
 };
 
+export const getModerationStatus = (action) => {
+  switch (action) {
+    case "approve":
+      return "approved";
+    case "request_changes":
+      return "changes_requested";
+    case "hide":
+      return "hidden";
+    case "unhide":
+      return "approved";
+    case "reject":
+      return "rejected";
+    default:
+      return "pending";
+  }
+};
+
 export const createListing = async (sellerId, data) => {
   await ensureApprovedSeller(sellerId);
   await ensureCategoryExists(data.categoryId);
@@ -105,7 +122,7 @@ export const getPublicListings = async (query) => {
   const skip = (page - 1) * limit;
   const [items, total] = await Promise.all([
     Listing.find(filter)
-      .populate("sellerId", "name email role")
+      .populate("sellerId", "name email role verifiedSeller")
       .populate("categoryId", "name slug description")
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -127,7 +144,7 @@ export const getPublicListings = async (query) => {
 
 export const getPublicListingBySlug = async (slug) => {
   const listing = await Listing.findOne({ slug, status: "approved" })
-    .populate("sellerId", "name email role")
+    .populate("sellerId", "name email role verifiedSeller")
     .populate("categoryId", "name slug description")
     .select("-__v");
 
@@ -137,6 +154,7 @@ export const getPublicListingBySlug = async (slug) => {
 
 export const getMyListings = async (sellerId) => {
   return Listing.find({ sellerId })
+    .populate("sellerId", "name email role verifiedSeller")
     .populate("categoryId", "name slug description")
     .sort({ createdAt: -1 })
     .select("-__v");
@@ -153,7 +171,11 @@ export const updateListing = async (listingId, sellerId, data) => {
     listing.slug = await generateUniqueSlug(data.title, listing._id);
   }
 
-  Object.assign(listing, data, { status: "pending" });
+  Object.assign(listing, data, {
+    status: "pending",
+    moderationFeedback: "",
+    moderationUpdatedAt: new Date(),
+  });
   await listing.save();
 
   return listing;
@@ -167,29 +189,47 @@ export const deleteListing = async (listingId, sellerId) => {
 
 export const getAllListingsForAdmin = async () => {
   return Listing.find()
-    .populate("sellerId", "name email role")
+    .populate("sellerId", "name email role verifiedSeller")
     .populate("categoryId", "name slug description")
     .sort({ createdAt: -1 })
     .select("-__v");
 };
 
-export const approveListing = async (listingId) => {
+export const moderateListing = async (listingId, action, feedback = "") => {
   const listing = await Listing.findById(listingId);
   if (!listing) throw createHttpError("Listing not found", 404);
 
-  listing.status = "approved";
-  listing.verificationStatus = "verified";
-  await listing.save();
+  const nextStatus = getModerationStatus(action);
+  listing.status = nextStatus;
+  listing.moderationFeedback = feedback?.trim() || "";
+  listing.moderationUpdatedAt = new Date();
 
+  if (action === "approve" || action === "unhide") {
+    listing.verificationStatus = "verified";
+  } else if (action === "request_changes" || action === "reject" || action === "hide") {
+    listing.verificationStatus = "unverified";
+  }
+
+  await listing.save();
   return listing;
 };
 
-export const rejectListing = async (listingId) => {
-  const listing = await Listing.findById(listingId);
-  if (!listing) throw createHttpError("Listing not found", 404);
+export const approveListing = async (listingId, feedback = "") => {
+  return moderateListing(listingId, "approve", feedback);
+};
 
-  listing.status = "rejected";
-  await listing.save();
+export const rejectListing = async (listingId, feedback = "") => {
+  return moderateListing(listingId, "reject", feedback);
+};
 
-  return listing;
+export const requestChangesListing = async (listingId, feedback = "") => {
+  return moderateListing(listingId, "request_changes", feedback);
+};
+
+export const hideListing = async (listingId, feedback = "") => {
+  return moderateListing(listingId, "hide", feedback);
+};
+
+export const unhideListing = async (listingId, feedback = "") => {
+  return moderateListing(listingId, "unhide", feedback);
 };

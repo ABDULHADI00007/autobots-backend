@@ -96,6 +96,17 @@ export const handleWebhook = async (rawBody, signature) => {
       console.log("[orders:webhook] order creation success", { orderId: createdOrder._id?.toString?.() || createdOrder._id });
 
       try {
+        await TimelineEvent.create({
+          scopeType: "order", scopeId: createdOrder._id,
+          eventType: "OrderCreated", actorId: buyerId,
+          title: "Order created",
+          description: "Payment confirmed and funds placed in escrow.",
+          payload: { amount: createdOrder.amount, listingId },
+          visibility: "participants",
+        });
+      } catch (_) {}
+
+      try {
         await createOrderConversation(createdOrder._id);
         console.log("[orders:webhook] order conversation created", { orderId: createdOrder._id?.toString?.() });
       } catch (convErr) {
@@ -154,7 +165,15 @@ export const acceptOrder = async (orderId, sellerId) => {
   if (order.status !== "pending") throw new Error("Order must be pending to accept");
 
   order.status = "accepted";
-  return order.save();
+  const saved = await order.save();
+  await TimelineEvent.create({
+    scopeType: "order", scopeId: orderId,
+    eventType: "OrderAccepted", actorId: sellerId,
+    title: "Order accepted",
+    description: "Seller accepted the order and committed to delivery.",
+    visibility: "participants",
+  });
+  return saved;
 };
 
 export const deliverOrder = async (orderId, sellerId, deliveryNotes) => {
@@ -212,10 +231,17 @@ export const approveDelivery = async (orderId, buyerId) => {
   order.completedAt = new Date();
   order.adminDecisionAt = new Date();
 
-  // NOTE: Actual fund transfer to seller (payout) must be handled via Stripe Connect
-  // or manual payout. Here we mark the payment as released in DB.
+  const saved = await order.save();
 
-  return order.save();
+  await TimelineEvent.create({
+    scopeType: "order", scopeId: orderId,
+    eventType: "OrderCompleted", actorId: buyerId,
+    title: "Order completed",
+    description: "Buyer approved the delivery. Funds released to seller.",
+    visibility: "participants",
+  });
+
+  return saved;
 };
 
 
@@ -279,6 +305,15 @@ export const autoReleaseOverdue = async () => {
     order.status = "completed";
     order.completedAt = new Date();
     await order.save();
+    try {
+      await TimelineEvent.create({
+        scopeType: "order", scopeId: order._id,
+        eventType: "AutoReleaseTriggered", actorId: null,
+        title: "Auto-release triggered",
+        description: "Review deadline passed. Funds automatically released to seller.",
+        visibility: "participants",
+      });
+    } catch (_) {}
     releasedCount += 1;
   }
 
@@ -310,7 +345,17 @@ export const adminReleaseFunds = async (orderId, session = null) => {
   order.status = "completed";
   order.adminDecisionAt = new Date();
   order.completedAt = new Date();
-  return order.save({ session });
+  const savedRelease = await order.save({ session });
+  try {
+    await TimelineEvent.create({
+      scopeType: "order", scopeId: orderId,
+      eventType: "AdminFundsReleased", actorId: null,
+      title: "Funds released by admin",
+      description: "Admin manually released funds to seller.",
+      visibility: "participants",
+    });
+  } catch (_) {}
+  return savedRelease;
 };
 
 export const adminRefundFunds = async (orderId, session = null) => {
@@ -332,7 +377,17 @@ export const adminRefundFunds = async (orderId, session = null) => {
   order.paymentStatus = "refunded";
   order.status = "cancelled";
   order.adminDecisionAt = new Date();
-  return order.save({ session });
+  const savedRefund = await order.save({ session });
+  try {
+    await TimelineEvent.create({
+      scopeType: "order", scopeId: orderId,
+      eventType: "AdminFundsRefunded", actorId: null,
+      title: "Funds refunded by admin",
+      description: "Admin manually issued a refund to buyer.",
+      visibility: "participants",
+    });
+  } catch (_) {}
+  return savedRefund;
 };
 
 export const cancelOrder = async (orderId, userId) => {
@@ -355,5 +410,13 @@ export const cancelOrder = async (orderId, userId) => {
   }
 
   order.status = "cancelled";
-  return order.save();
+  const saved = await order.save();
+  await TimelineEvent.create({
+    scopeType: "order", scopeId: orderId,
+    eventType: "OrderCancelled", actorId: userId,
+    title: "Order cancelled",
+    description: "Order was cancelled.",
+    visibility: "participants",
+  });
+  return saved;
 };

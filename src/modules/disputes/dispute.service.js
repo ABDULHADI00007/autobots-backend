@@ -4,6 +4,7 @@ import Dispute from "./dispute.model.js";
 import Order from "../orders/order.model.js";
 import { env } from "../../config/env.js";
 import { createDisputeConversation } from "../messages/conversation.service.js";
+import TimelineEvent from "../timeline/timelineEvent.model.js";
 
 const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 const DISPUTABLE_ORDER_STATUSES = ["delivered", "revision_requested"];
@@ -68,6 +69,17 @@ export const createDispute = async ({ orderId, openerId, openerRole, reason }) =
       console.error("[disputes:createDispute] dispute conversation creation failed (non-fatal)", convErr?.message || convErr);
     }
 
+    try {
+      await TimelineEvent.create({
+        scopeType: "dispute", scopeId: dispute._id,
+        eventType: "DisputeOpened", actorId: openerId,
+        title: "Dispute opened",
+        description: `Dispute opened by ${openerRole}.`,
+        payload: { openerRole, reason },
+        visibility: "participants",
+      });
+    } catch (_) {}
+
     return dispute;
   } catch (err) {
     await session.abortTransaction();
@@ -103,11 +115,18 @@ export const getAllDisputes = async () => {
   return Dispute.find().populate("orderId");
 };
 
-export const resolveDispute = async (disputeId, decision, adminNotes) => {
+export const resolveDispute = async (disputeId, decision, adminNotes, adminId = null) => {
   // Decision validation
   if (!["release", "refund"].includes(decision)) {
     throw new Error("Invalid dispute decision");
   }
+
+  const internalDecision = decision === "refund" ? "buyer_wins" : "seller_wins";
+  return resolveDisputeFinal(disputeId, internalDecision, adminNotes || "", adminId);
+};
+
+export const resolveDisputeFinal = async (disputeId, decision, notes, adminId) => {
+  const internalDecision = decision === "buyer_wins" ? "refund" : "release";
 
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -115,49 +134,70 @@ export const resolveDispute = async (disputeId, decision, adminNotes) => {
   try {
     const dispute = await Dispute.findById(disputeId).session(session);
     if (!dispute) throw new Error("Dispute not found");
-
     if (dispute.status === "resolved") throw new Error("Dispute already resolved");
 
-    // Load order inside txn
     const order = await Order.findById(dispute.orderId).session(session);
     if (!order) throw new Error("Order not found");
 
-    // Apply admin decision with DB updates inside transaction. For refunds, attempt external refund before commit.
-    if (decision === "release") {
+    if (internalDecision === "release") {
       if (order.paymentStatus !== "held") throw new Error("Only held payments can be released");
       order.paymentStatus = "released";
       order.status = "completed";
       order.adminDecisionAt = new Date();
       order.completedAt = new Date();
       dispute.adminDecision = "release";
-    } else if (decision === "refund") {
+    } else {
       if (order.paymentStatus !== "held") throw new Error("Only held payments can be refunded");
-
-      // Attempt Stripe refund if intent exists. If refund fails, abort txn to keep DB consistent.
       if (order.stripePaymentIntentId) {
         try {
           await stripe.refunds.create({ payment_intent: order.stripePaymentIntentId });
-        } catch (err) {
-          throw new Error("Stripe refund failed: " + (err.message || err));
+        } catch (stripeErr) {
+          throw new Error("Stripe refund failed: " + (stripeErr.message || stripeErr));
         }
       }
-
       order.paymentStatus = "refunded";
       order.status = "cancelled";
       order.adminDecisionAt = new Date();
       dispute.adminDecision = "refund";
     }
 
-    // Update dispute and order within transaction
     dispute.status = "resolved";
-    dispute.adminNotes = adminNotes || "";
+    dispute.resolutionDecision = decision;
+    dispute.resolutionNotes = notes;
+    dispute.resolvedBy = adminId;
     dispute.resolvedAt = new Date();
+    dispute.adminNotes = notes;
 
     await order.save({ session });
     await dispute.save({ session });
-
     await session.commitTransaction();
     session.endSession();
+
+    const decisionEventType = internalDecision === "release" ? "FundsReleased" : "RefundIssued";
+    const decisionTitle = internalDecision === "release" ? "Funds released to seller" : "Refund issued to buyer";
+    const winnerLabel = decision === "buyer_wins" ? "Buyer wins" : "Seller wins";
+
+    try {
+      await TimelineEvent.create([
+        {
+          scopeType: "dispute", scopeId: disputeId,
+          eventType: "DisputeResolved", actorId: adminId,
+          title: "Dispute resolved",
+          description: `Admin resolved the dispute. ${winnerLabel}.`,
+          payload: { resolutionDecision: decision, notes },
+          visibility: "participants",
+        },
+        {
+          scopeType: "dispute", scopeId: disputeId,
+          eventType: decisionEventType, actorId: adminId,
+          title: decisionTitle,
+          description: decisionTitle + ".",
+          payload: { resolutionDecision: decision },
+          visibility: "participants",
+        },
+      ]);
+    } catch (_err) {}
+
     return dispute;
   } catch (err) {
     await session.abortTransaction();

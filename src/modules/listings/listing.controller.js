@@ -5,6 +5,7 @@ import {
   listingIdParamSchema,
   listingSlugParamSchema,
   listingQuerySchema,
+  listingModerationSchema,
 } from "./listing.validation.js";
 import * as listingService from "./listing.service.js";
 
@@ -85,22 +86,33 @@ export const getAllListingsForAdminController = async (req, res) => {
   }
 };
 
-export const approveListingController = async (req, res) => {
+const moderateListingController = async (req, res, action, successMessage) => {
   try {
     const { id } = listingIdParamSchema.parse(req.params);
-    const listing = await listingService.approveListing(id);
-    return successResponse(res, "Listing approved successfully", listing, 200);
+    const { feedback } = listingModerationSchema.parse(req.body);
+    const listing = await listingService.moderateListing(id, action, feedback);
+    return successResponse(res, successMessage, listing, 200);
   } catch (error) {
-    return handleError(res, error, "Failed to approve listing");
+    return handleError(res, error, "Failed to update listing moderation");
   }
 };
 
+export const approveListingController = async (req, res) => {
+  return moderateListingController(req, res, "approve", "Listing approved successfully");
+};
+
 export const rejectListingController = async (req, res) => {
-  try {
-    const { id } = listingIdParamSchema.parse(req.params);
-    const listing = await listingService.rejectListing(id);
-    return successResponse(res, "Listing rejected successfully", listing, 200);
-  } catch (error) {
-    return handleError(res, error, "Failed to reject listing");
-  }
+  return moderateListingController(req, res, "reject", "Listing rejected successfully");
+};
+
+export const requestChangesListingController = async (req, res) => {
+  return moderateListingController(req, res, "request_changes", "Listing marked for changes");
+};
+
+export const hideListingController = async (req, res) => {
+  return moderateListingController(req, res, "hide", "Listing hidden successfully");
+};
+
+export const unhideListingController = async (req, res) => {
+  return moderateListingController(req, res, "unhide", "Listing made visible again");
 };
