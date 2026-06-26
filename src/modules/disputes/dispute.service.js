@@ -78,7 +78,9 @@ export const createDispute = async ({ orderId, openerId, openerRole, reason }) =
         payload: { openerRole, reason },
         visibility: "participants",
       });
-    } catch (_) {}
+    } catch (err) {
+      console.error("[disputes:timeline]", { disputeId: dispute._id, eventType: "DisputeOpened", error: err?.message || err });
+    }
 
     return dispute;
   } catch (err) {
@@ -108,11 +110,48 @@ export const getMyDisputes = async (userId, userRole) => {
 
   return Dispute.find({ orderId: { $in: orderIds } })
     .select("-adminNotes")
-    .populate("orderId");
+    .populate("orderId")
+    .populate("openerId", "name role");
+};
+
+export const getDisputeById = async (disputeId, userId, userRole) => {
+  if (!mongoose.Types.ObjectId.isValid(disputeId)) {
+    throw new Error("Invalid dispute ID");
+  }
+
+  const disputeQuery = Dispute.findById(disputeId)
+    .populate("orderId")
+    .populate("openerId", "name role");
+
+  if (userRole !== "admin") {
+    disputeQuery.select("-adminNotes");
+  }
+
+  const dispute = await disputeQuery;
+  if (!dispute) throw new Error("Dispute not found");
+
+  if (userRole === "admin") return dispute;
+
+  const order = dispute.orderId;
+  const buyerId = order?.buyerId?.toString?.() ?? order?.buyerId;
+  const sellerId = order?.sellerId?.toString?.() ?? order?.sellerId;
+  const requesterId = userId?.toString();
+
+  if (requesterId !== buyerId?.toString() && requesterId !== sellerId?.toString()) {
+    throw new Error("Access denied");
+  }
+
+  return dispute;
 };
 
 export const getAllDisputes = async () => {
-  return Dispute.find().populate("orderId");
+  return Dispute.find().populate("orderId").populate("openerId", "name role");
+};
+
+export const getDisputeByOrderId = async (orderId) => {
+  if (!mongoose.Types.ObjectId.isValid(orderId)) throw new Error("Invalid order ID");
+  const dispute = await Dispute.findOne({ orderId }).select("_id status resolutionDecision openedAt resolvedAt openerRole");
+  return dispute ?? null;
 };
 
 export const resolveDispute = async (disputeId, decision, adminNotes, adminId = null) => {
@@ -196,7 +235,9 @@ export const resolveDisputeFinal = async (disputeId, decision, notes, adminId) =
           visibility: "participants",
         },
       ]);
-    } catch (_err) {}
+    } catch (err) {
+      console.error("[disputes:timeline]", { disputeId, eventType: "DisputeResolved", error: err?.message || err });
+    }
 
     return dispute;
   } catch (err) {

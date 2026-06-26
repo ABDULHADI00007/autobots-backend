@@ -9,6 +9,7 @@ import {
   getUserStats,
   getRefundStats,
   getReviewStats,
+  getAnalytics,
 } from "./dashboard.controller.js";
 
 const router = Router();
@@ -22,5 +23,6 @@ router.get("/listings", getListingStats);
 router.get("/users", getUserStats);
 router.get("/refunds", getRefundStats);
 router.get("/reviews", getReviewStats);
+router.get("/analytics", getAnalytics);
 
 export default router;

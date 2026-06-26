@@ -75,8 +75,7 @@ async function writeTimeline({ disputeId, eventType, actorId, title, description
       visibility:  visibility  || "participants",
     });
   } catch (err) {
-    // Timeline writes are non-fatal
-    console.error("[evidence:writeTimeline] non-fatal:", err?.message || err);
+    console.error("[evidence:timeline]", { disputeId, eventType, visibility, error: err?.message || err });
   }
 }
 

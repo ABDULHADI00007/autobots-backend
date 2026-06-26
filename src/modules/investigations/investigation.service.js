@@ -10,7 +10,11 @@ const VALID_PRIORITIES = ["low", "medium", "high", "urgent"];
 // ── helpers ──────────────────────────────────────────────────
 
 async function writeTimeline(disputeId, eventType, title, description, actorId, payload = {}, visibility = "internal") {
-  await TimelineEvent.create({ scopeType: "dispute", scopeId: disputeId, eventType, actorId, title, description, payload, visibility });
+  try {
+    await TimelineEvent.create({ scopeType: "dispute", scopeId: disputeId, eventType, actorId, title, description, payload, visibility });
+  } catch (err) {
+    console.error("[investigations:timeline]", { disputeId, eventType, visibility, error: err?.message || err });
+  }
 }
 
 async function ensureInvestigation(disputeId) {

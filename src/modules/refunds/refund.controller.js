@@ -24,10 +24,26 @@ export const getMyRefunds = async (req, res) => {
 
 export const getAllRefunds = async (req, res) => {
   try {
-    const refunds = await refundService.getAllRefunds();
+    const refunds = await refundService.getAllRefunds({
+      page: req.query.page,
+      limit: req.query.limit,
+      search: req.query.search,
+      status: req.query.status,
+      sortBy: req.query.sortBy,
+      sortOrder: req.query.sortOrder,
+    });
     return successResponse(res, "All refund requests fetched successfully", refunds);
   } catch (err) {
     return errorResponse(res, err.message);
+  }
+};
+
+export const getRefundById = async (req, res) => {
+  try {
+    const refund = await refundService.getRefundById(req.params.id);
+    return successResponse(res, "Refund request fetched successfully", refund);
+  } catch (err) {
+    return errorResponse(res, err.message, 400);
   }
 };
 

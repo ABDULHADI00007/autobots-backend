@@ -1,4 +1,4 @@
-import { createDisputeSchema, adminResolveSchema, adminResolutionSchema } from "./dispute.validation.js";
+import { createDisputeSchema, adminResolveSchema, adminResolutionSchema, disputeIdParamSchema } from "./dispute.validation.js";
 import * as disputeService from "./dispute.service.js";
 import { successResponse, errorResponse } from "../../utils/ApiResponse.js";
 
@@ -27,10 +27,31 @@ export const getMyDisputesController = async (req, res) => {
   }
 };
 
+export const getDisputeByIdController = async (req, res) => {
+  try {
+    const { id } = disputeIdParamSchema.parse(req.params);
+    const dispute = await disputeService.getDisputeById(id, req.user.userId, req.user.role);
+    return successResponse(res, "Dispute fetched", dispute, 200);
+  } catch (err) {
+    if (err.name === "ZodError") return errorResponse(res, err.issues[0]?.message || "Validation failed", 400);
+    const status = err.message === "Access denied" ? 403 : err.message === "Dispute not found" ? 404 : 400;
+    return errorResponse(res, err.message, status);
+  }
+};
+
 export const getAllDisputesController = async (req, res) => {
   try {
     const disputes = await disputeService.getAllDisputes();
     return successResponse(res, "All disputes fetched", disputes, 200);
+  } catch (err) {
+    return errorResponse(res, err.message, 400);
+  }
+};
+
+export const getDisputeByOrderController = async (req, res) => {
+  try {
+    const dispute = await disputeService.getDisputeByOrderId(req.params.orderId);
+    return successResponse(res, "Dispute fetched", dispute, 200);
   } catch (err) {
     return errorResponse(res, err.message, 400);
   }

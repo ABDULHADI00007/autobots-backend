@@ -35,7 +35,7 @@ const refundSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "approved", "rejected"],
+      enum: ["pending", "processing", "approved", "rejected", "completed"],
       default: "pending",
     },
   },

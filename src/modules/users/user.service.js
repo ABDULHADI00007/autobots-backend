@@ -3,6 +3,7 @@ import Listing from "../listings/listing.model.js";
 import Order from "../orders/order.model.js";
 import Dispute from "../disputes/dispute.model.js";
 import Refund from "../refunds/refund.model.js";
+import { getPaginationValues, buildPaginationMeta } from "../../utils/pagination.js";
 
 export const getProfile = async (userId) => {
   const user = await User.findById(userId).select("-password");
@@ -45,6 +46,12 @@ const toBuyerAdminSummary = (user, orders = [], disputes = [], refunds = []) => 
   highDisputeActivity: disputes.length >= 2,
 });
 
+export const getAdminUsers = async () => {
+  return User.find({ role: "admin" })
+    .select("_id name email role")
+    .sort({ name: 1 });
+};
+
 export const getAdminSellers = async () => {
   const sellers = await User.find({ role: "seller" })
     .select("-password")
@@ -72,7 +79,17 @@ export const getAdminSellerById = async (userId) => {
   };
 };
 
-export const getAdminBuyers = async () => {
+export const getAdminBuyers = async (query = {}) => {
+  const {
+    search = "",
+    status = "all",
+    risk = [],
+    sortBy = "createdAt",
+    sortOrder = "desc",
+    page = 1,
+    limit = 20,
+  } = query;
+
   const buyers = await User.find({ role: "buyer" })
     .select("-password")
     .sort({ createdAt: -1 });
@@ -84,12 +101,56 @@ export const getAdminBuyers = async () => {
     Refund.find({ buyerId: { $in: buyerIds } }).select("buyerId status"),
   ]);
 
-  return buyers.map((buyer) => {
-    const buyerOrders = orders.filter((order) => order.buyerId?.toString() === buyer._id.toString());
-    const buyerDisputes = disputes.filter((dispute) => dispute.openerId?.toString() === buyer._id.toString());
-    const buyerRefunds = refunds.filter((refund) => refund.buyerId?.toString() === buyer._id.toString());
-    return toBuyerAdminSummary(buyer, buyerOrders, buyerDisputes, buyerRefunds);
+  const summaries = buyers
+    .map((buyer) => {
+      const buyerOrders = orders.filter((order) => order.buyerId?.toString() === buyer._id.toString());
+      const buyerDisputes = disputes.filter((dispute) => dispute.openerId?.toString() === buyer._id.toString());
+      const buyerRefunds = refunds.filter((refund) => refund.buyerId?.toString() === buyer._id.toString());
+      return toBuyerAdminSummary(buyer, buyerOrders, buyerDisputes, buyerRefunds);
+    })
+    .filter((buyer) => {
+      const searchText = search.trim().toLowerCase();
+      const matchesSearch = !searchText || buyer.name.toLowerCase().includes(searchText) || buyer.email.toLowerCase().includes(searchText);
+      const matchesStatus = status === "all" || (status === "active" ? buyer.status === "active" : buyer.status === "suspended");
+      const matchesRisk = risk.length === 0 || risk.some((filter) => filter === "highRefund" ? buyer.highRefundActivity : buyer.highDisputeActivity);
+      return matchesSearch && matchesStatus && matchesRisk;
+    });
+
+  const direction = sortOrder === "asc" ? 1 : -1;
+  const sorted = [...summaries].sort((left, right) => {
+    const getValue = (buyer) => {
+      switch (sortBy) {
+        case "name":
+          return buyer.name.toLowerCase();
+        case "email":
+          return buyer.email.toLowerCase();
+        case "totalOrders":
+          return buyer.totalOrders;
+        case "totalSpend":
+          return buyer.totalSpend;
+        case "disputesOpened":
+          return buyer.disputesOpened;
+        case "refundCount":
+          return buyer.refundCount;
+        default:
+          return new Date(buyer.createdAt).getTime();
+      }
+    };
+
+    const leftValue = getValue(left);
+    const rightValue = getValue(right);
+    if (leftValue < rightValue) return -1 * direction;
+    if (leftValue > rightValue) return 1 * direction;
+    return 0;
   });
+
+  const { page: safePage, limit: safeLimit, skip } = getPaginationValues(page, limit);
+  const paginatedItems = sorted.slice(skip, skip + safeLimit);
+
+  return {
+    items: paginatedItems,
+    pagination: buildPaginationMeta(safePage, safeLimit, sorted.length),
+  };
 };
 
 export const getAdminBuyerById = async (userId) => {

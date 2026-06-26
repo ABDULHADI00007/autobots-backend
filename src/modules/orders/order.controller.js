@@ -50,10 +50,21 @@ export const getSellerOrders = async (req, res) => {
 
 export const getAllOrders = async (req, res) => {
   try {
-    const orders = await orderService.getAllOrders();
-    return successResponse(res, "All orders fetched successfully", orders);
+    const { page, limit, search, status, sortBy, sortOrder } = req.query;
+    const result = await orderService.getAllOrders({ page, limit, search, status, sortBy, sortOrder });
+    return successResponse(res, "All orders fetched successfully", result);
   } catch (err) {
     return errorResponse(res, err.message);
+  }
+};
+
+export const getAdminOrderById = async (req, res) => {
+  try {
+    const order = await orderService.getAdminOrderById(req.params.id);
+    return successResponse(res, "Order fetched successfully", order);
+  } catch (err) {
+    const status = err.message === "Order not found" ? 404 : 400;
+    return errorResponse(res, err.message, status);
   }
 };
 

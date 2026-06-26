@@ -6,6 +6,7 @@ import TimelineEvent from "../timeline/timelineEvent.model.js";
 import { env } from "../../config/env.js";
 import { createOrderConversation } from "../messages/conversation.service.js";
 import { createOrderDelivery as createDeliveryVersion } from "../deliveries/delivery.service.js";
+import { getPaginationValues } from "../../utils/pagination.js";
 
 
 const stripe = new Stripe(env.STRIPE_SECRET_KEY);
@@ -149,11 +150,67 @@ export const getSellerOrders = async (sellerId) => {
     .populate("buyerId", "name email");
 };
 
-export const getAllOrders = async () => {
-  return Order.find()
+export const getAllOrders = async ({ page = 1, limit = 20, search = "", status = "", sortBy = "createdAt", sortOrder = "desc" } = {}) => {
+  const { page: safePage, limit: safeLimit, skip } = getPaginationValues(page, limit);
+
+  // ── build filter ──────────────────────────────────────────
+  const filter = {};
+  if (status && status !== "all") filter.status = status;
+
+  // search requires joining — resolve user IDs first if search term present
+  if (search && search.trim()) {
+    const q = search.trim();
+    const objectIdLike = /^[a-f\d]{24}$/i.test(q);
+    const User = (await import("../users/user.model.js")).default;
+    const userRegex = new RegExp(q, "i");
+    const matchedUsers = await User.find({
+      $or: [{ name: userRegex }, { email: userRegex }],
+    }).select("_id").lean();
+    const userIds = matchedUsers.map(u => u._id);
+
+    const searchClauses = [
+      { buyerId: { $in: userIds } },
+      { sellerId: { $in: userIds } },
+    ];
+    if (objectIdLike) searchClauses.push({ _id: q });
+
+    // listing title search — find matching listing IDs
+    const Listing = (await import("../listings/listing.model.js")).default;
+    const matchedListings = await Listing.find({ title: userRegex }).select("_id").lean();
+    if (matchedListings.length > 0) {
+      searchClauses.push({ listingId: { $in: matchedListings.map(l => l._id) } });
+    }
+
+    filter.$or = searchClauses;
+  }
+
+  // ── sort ──────────────────────────────────────────────────
+  const allowedSortFields = { createdAt: 1, amount: 1, updatedAt: 1 };
+  const sortField = allowedSortFields[sortBy] !== undefined ? sortBy : "createdAt";
+  const sortDir = sortOrder === "asc" ? 1 : -1;
+
+  const [items, total] = await Promise.all([
+    Order.find(filter)
+      .sort({ [sortField]: sortDir })
+      .skip(skip)
+      .limit(safeLimit)
+      .populate("listingId", "title slug price")
+      .populate("buyerId", "name email")
+      .populate("sellerId", "name email")
+      .lean(),
+    Order.countDocuments(filter),
+  ]);
+
+  return { items, total, page: safePage, limit: safeLimit, totalPages: Math.ceil(total / safeLimit) };
+};
+
+export const getAdminOrderById = async (orderId) => {
+  const order = await Order.findById(orderId)
     .populate("listingId", "title slug price")
     .populate("buyerId", "name email")
     .populate("sellerId", "name email");
+  if (!order) throw new Error("Order not found");
+  return order;
 };
 
 // ── Status Updates / Escrow Flow ─────────────────────────────────────────────

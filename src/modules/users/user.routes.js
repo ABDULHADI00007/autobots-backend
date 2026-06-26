@@ -5,6 +5,7 @@ import {
   getProfileController,
   updateProfileController,
   updateRoleController,
+  getAdminUsersController,
   getAdminSellersController,
   getAdminSellerByIdController,
   getAdminBuyersController,
@@ -22,6 +23,7 @@ router.get("/profile", authMiddleware, getProfileController);
 router.put("/profile", authMiddleware, updateProfileController);
 router.put("/role", authMiddleware, updateRoleController);
 
+router.get("/admin/admins", authMiddleware, roleMiddleware("admin"), getAdminUsersController);
 router.get("/admin/sellers", authMiddleware, roleMiddleware("admin"), getAdminSellersController);
 router.get("/admin/sellers/:userId", authMiddleware, roleMiddleware("admin"), getAdminSellerByIdController);
 router.post("/admin/sellers/:userId/verify", authMiddleware, roleMiddleware("admin"), verifySellerController);

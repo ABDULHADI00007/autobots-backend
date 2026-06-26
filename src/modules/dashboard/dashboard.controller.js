@@ -63,3 +63,16 @@ export const getReviewStats = async (req, res) => {
     return errorResponse(res, err.message);
   }
 };
+
+export const getAnalytics = async (req, res) => {
+  try {
+    const data = await dashboardService.getAnalytics({
+      range: req.query.range,
+      startDate: req.query.startDate,
+      endDate: req.query.endDate,
+    });
+    return successResponse(res, "Analytics fetched successfully", data);
+  } catch (err) {
+    return errorResponse(res, err.message || "Failed to fetch analytics");
+  }
+};

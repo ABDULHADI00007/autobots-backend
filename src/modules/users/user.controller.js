@@ -1,8 +1,9 @@
-import { profileUpdateSchema, buyerAdminNoteSchema, buyerSuspendSchema } from "./user.validation.js";
+import { profileUpdateSchema, buyerAdminNoteSchema, buyerSuspendSchema, buyerAdminListSchema } from "./user.validation.js";
 import {
   getProfile,
   updateProfile,
   updateRole,
+  getAdminUsers,
   getAdminSellers,
   getAdminSellerById,
   getAdminBuyers,
@@ -49,6 +50,15 @@ export const updateProfileController = async (req, res) => {
   }
 };
 
+export const getAdminUsersController = async (req, res) => {
+  try {
+    const admins = await getAdminUsers();
+    return successResponse(res, "Admins fetched successfully", admins, 200);
+  } catch (error) {
+    return errorResponse(res, error.message || "Failed to fetch admins", 400);
+  }
+};
+
 export const getAdminSellersController = async (req, res) => {
   try {
     const sellers = await getAdminSellers();
@@ -69,9 +79,13 @@ export const getAdminSellerByIdController = async (req, res) => {
 
 export const getAdminBuyersController = async (req, res) => {
   try {
-    const buyers = await getAdminBuyers();
+    const query = buyerAdminListSchema.parse(req.query);
+    const buyers = await getAdminBuyers(query);
     return successResponse(res, "Buyers fetched successfully", buyers, 200);
   } catch (error) {
+    if (error.name === "ZodError") {
+      return errorResponse(res, error.issues[0]?.message || "Validation failed", 400);
+    }
     return errorResponse(res, error.message || "Failed to fetch buyers", 400);
   }
 };

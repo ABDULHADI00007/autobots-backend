@@ -6,6 +6,7 @@ import {
   getBuyerOrders,
   getSellerOrders,
   getAllOrders,
+  getAdminOrderById,
   acceptOrder,
   cancelOrder,
   deliverOrder,
@@ -24,6 +25,7 @@ router.post("/checkout", authMiddleware, roleMiddleware("buyer"), createCheckout
 router.get("/my", authMiddleware, roleMiddleware("buyer"), getBuyerOrders);
 router.get("/seller", authMiddleware, roleMiddleware("seller"), getSellerOrders);
 router.get("/admin/all", authMiddleware, roleMiddleware("admin"), getAllOrders);
+router.get("/admin/:id", authMiddleware, roleMiddleware("admin"), getAdminOrderById);
 
 // Status updates
 router.put("/:id/accept", authMiddleware, roleMiddleware("seller"), acceptOrder);
