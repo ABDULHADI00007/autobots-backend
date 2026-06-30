@@ -55,6 +55,10 @@ app.use((req, res, next) => {
   ) {
     return express.json({ limit: "15mb" })(req, res, next);
   }
+  // Listing media files: demoVideo, documentation, setupGuide (up to 250MB) — 300MB ceiling
+  if (req.path.match(/^\/api\/listings\/[^/]+\/media\/(demoVideo|documentation|setupGuide)$/)) {
+    return express.json({ limit: "300mb" })(req, res, next);
+  }
   // Seller application documents: identity (10 MB), portfolio (25 MB), supporting (25 MB) — 30 MB ceiling
   if (req.path.match(/^\/api\/seller-applications\/me\/documents\//)) {
     return express.json({ limit: "30mb" })(req, res, next);

@@ -96,6 +96,67 @@ export const createListing = async (sellerId, data) => {
   });
 };
 
+// ── Draft workflow (Phase 11G) ────────────────────────────────
+
+/**
+ * Creates a minimal draft listing so the seller immediately gets a
+ * Listing ID. Only a title placeholder is required. The listing is
+ * stored with status "draft" and will never appear publicly.
+ */
+export const createDraftListing = async (sellerId, { title }) => {
+  // Note: ensureApprovedSeller is intentionally NOT called here.
+  // The route is already protected by roleMiddleware("seller").
+  // Approved-application enforcement happens at submitDraftListing,
+  // not at draft creation — otherwise sellers-in-progress can never start.
+
+  const slug = await generateUniqueSlug(title);
+
+  return Listing.create({
+    sellerId,
+    slug,
+    title,
+    // Required schema fields — filled with safe placeholder values.
+    // The seller must complete them before submitting.
+    categoryId:       "000000000000000000000000", // placeholder; overwritten on submit
+    outcome:          "",
+    shortDescription: "",
+    fullDescription:  "",
+    difficultyLevel:  "moderate",
+    price:            0,
+    status:           "draft",
+    verificationStatus: "unverified",
+  });
+};
+
+/**
+ * Validates and transitions a draft listing to "pending" for admin review.
+ * Applies full field validation before updating status.
+ */
+export const submitDraftListing = async (listingId, sellerId, data) => {
+  const listing = await getListingOwnedBySeller(listingId, sellerId);
+
+  if (listing.status !== "draft") {
+    throw createHttpError("Only draft listings can be submitted", 400);
+  }
+
+  await ensureCategoryExists(data.categoryId);
+
+  // Regenerate slug if title changed
+  if (data.title && data.title !== listing.title) {
+    listing.slug = await generateUniqueSlug(data.title, listing._id);
+  }
+
+  Object.assign(listing, data, {
+    status: "pending",
+    verificationStatus: "unverified",
+    moderationFeedback: "",
+    moderationUpdatedAt: new Date(),
+  });
+
+  await listing.save();
+  return listing;
+};
+
 export const getPublicListings = async (query) => {
   const { page, limit, search, category, difficulty, verificationStatus } = query;
   const filter = { status: "approved" };
@@ -477,7 +538,8 @@ export const deleteListingMedia = async (listingId, sellerId, mediaType) => {
 };
 
 export const getAllListingsForAdmin = async () => {
-  return Listing.find()
+  // Drafts are never shown to admin — only submitted listings appear in the review queue
+  return Listing.find({ status: { $ne: "draft" } })
     .populate("sellerId", "name email role verifiedSeller")
     .populate("categoryId", "name slug description")
     .sort({ createdAt: -1 })

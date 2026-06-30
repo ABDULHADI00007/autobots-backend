@@ -10,7 +10,7 @@ const listingSchema = new mongoose.Schema(
     categoryId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Category",
-      required: true,
+      required: function() { return this.status !== "draft"; },
     },
     title: {
       type: String,
@@ -26,17 +26,17 @@ const listingSchema = new mongoose.Schema(
     },
     outcome: {
       type: String,
-      required: true,
+      required: function() { return this.status !== "draft"; },
       trim: true,
     },
     shortDescription: {
       type: String,
-      required: true,
+      required: function() { return this.status !== "draft"; },
       trim: true,
     },
     fullDescription: {
       type: String,
-      required: true,
+      required: function() { return this.status !== "draft"; },
       trim: true,
     },
     difficultyLevel: {
@@ -55,7 +55,7 @@ const listingSchema = new mongoose.Schema(
     },
     price: {
       type: Number,
-      required: true,
+      required: function() { return this.status !== "draft"; },
       min: 0,
     },
     demoVideo: {
@@ -89,7 +89,7 @@ const listingSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "approved", "rejected", "changes_requested", "hidden"],
+      enum: ["draft", "pending", "approved", "rejected", "changes_requested", "hidden"],
       default: "pending",
     },
     moderationFeedback: {

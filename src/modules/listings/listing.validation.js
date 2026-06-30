@@ -25,6 +25,29 @@ export const listingCreateSchema = z.object({
 
 export const listingUpdateSchema = listingCreateSchema.partial();
 
+// ── Draft schemas (Phase 11G) ─────────────────────────────────
+// createDraftSchema: bare minimum to open the form — just a placeholder title.
+export const createDraftSchema = z.object({
+  title: z.string().trim().min(1, "Title is required"),
+});
+
+// submitDraftSchema: full validation applied when seller clicks Submit.
+export const submitDraftSchema = z.object({
+  categoryId: objectId,
+  title: z.string().trim().min(1, "Title is required"),
+  outcome: z.string().trim().min(1, "Outcome is required"),
+  shortDescription: z.string().trim().min(1, "Short description is required"),
+  fullDescription: z.string().trim().min(1, "Full description is required"),
+  difficultyLevel: z.enum(["easy", "moderate", "advanced"], {
+    message: "Difficulty level must be easy, moderate, or advanced",
+  }),
+  requiredTools: z.array(z.string().trim().min(1)).optional(),
+  monthlySoftwareCost: z.number().min(0, "Monthly software cost must be positive").optional(),
+  price: z.number().positive("Price must be positive"),
+  estimatedOutcomes: optionalText,
+  deliverables: z.array(z.string().trim().min(1)).optional(),
+});
+
 export const listingModerationSchema = z.object({
   feedback: z.string().trim().optional().default(""),
 });

@@ -12,6 +12,8 @@ import {
   demoVideoUploadSchema,
   documentationUploadSchema,
   setupGuideUploadSchema,
+  createDraftSchema,
+  submitDraftSchema,
 } from "./listing.validation.js";
 import * as listingService from "./listing.service.js";
 
@@ -247,5 +249,28 @@ export const deleteListingMediaController = async (req, res) => {
   } catch (err) {
     if (err.name === "ZodError") return errorResponse(res, err.issues[0]?.message || "Validation failed", 400);
     return errorResponse(res, err.message || "Failed to remove media", storageStatusCode(err));
+  }
+};
+
+// ── Draft workflow (Phase 11G) ────────────────────────────────
+
+export const createDraftListingController = async (req, res) => {
+  try {
+    const { title } = createDraftSchema.parse(req.body);
+    const listing = await listingService.createDraftListing(req.user.userId, { title });
+    return successResponse(res, "Draft listing created", listing, 201);
+  } catch (error) {
+    return handleError(res, error, "Failed to create draft listing");
+  }
+};
+
+export const submitDraftListingController = async (req, res) => {
+  try {
+    const { id } = listingIdParamSchema.parse(req.params);
+    const data   = submitDraftSchema.parse(req.body);
+    const listing = await listingService.submitDraftListing(id, req.user.userId, data);
+    return successResponse(res, "Listing submitted for review", listing, 200);
+  } catch (error) {
+    return handleError(res, error, "Failed to submit listing");
   }
 };
