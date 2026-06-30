@@ -109,6 +109,44 @@ const listingSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // ── Listing Thumbnail (S3) ──────────────────────────────────
+    thumbnailKey: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    thumbnailUrl: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    // ── Listing Gallery (S3) ────────────────────────────────────
+    galleryKeys: {
+      type: [String],
+      default: [],
+    },
+    galleryUrls: {
+      type: [String],
+      default: [],
+    },
+    // ── Listing Media — S3 (Phase 11F) ──────────────────────────
+    demoVideoKey: { type: String, default: null, trim: true },
+    demoVideoUrl: { type: String, default: null, trim: true },
+    demoVideoFileName: { type: String, default: null, trim: true },
+    demoVideoMimeType: { type: String, default: null, trim: true },
+    demoVideoSizeBytes: { type: Number, default: null },
+
+    documentationKey: { type: String, default: null, trim: true },
+    documentationUrl: { type: String, default: null, trim: true },
+    documentationFileName: { type: String, default: null, trim: true },
+    documentationMimeType: { type: String, default: null, trim: true },
+    documentationSizeBytes: { type: Number, default: null },
+
+    setupGuideKey: { type: String, default: null, trim: true },
+    setupGuideUrl: { type: String, default: null, trim: true },
+    setupGuideFileName: { type: String, default: null, trim: true },
+    setupGuideMimeType: { type: String, default: null, trim: true },
+    setupGuideSizeBytes: { type: Number, default: null },
   },
   { timestamps: true }
 );

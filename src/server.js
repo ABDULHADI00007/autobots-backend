@@ -1,7 +1,11 @@
+import http from "http";
 import app from "./app.js";
 import connectDB from "./config/db.js";
 import { env } from "./config/env.js";
 import * as orderService from "./modules/orders/order.service.js";
+import { initializeSocket } from "./socket/index.js";
+import { validateResendConfiguration } from "./modules/email/email.client.js";
+import { validateStorageStartup } from "./config/storage/storage.startup.js";
 
 let server;
 
@@ -16,8 +20,34 @@ const startServer = async () => {
     await connectDB();
     console.log("✓ MongoDB connected successfully");
 
+    const httpServer = http.createServer(app);
+
+    try {
+      initializeSocket(httpServer);
+    } catch (error) {
+      console.warn("Socket.IO initialization failed, continuing without real-time layer:", error.message);
+    }
+
+    try {
+      await validateResendConfiguration();
+      console.log("✓ Resend configuration validated successfully");
+    } catch (error) {
+      console.error("Resend configuration validation failed:", error.message);
+      process.exit(1);
+    }
+
+    // Validate S3 bucket access (skipped gracefully when S3 is not configured)
+    try {
+      await validateStorageStartup();
+    } catch (error) {
+      console.error("S3 storage validation failed:", error.message);
+      if (env.isProduction) {
+        process.exit(1);
+      }
+    }
+
     // Start Express server
-    server = app.listen(env.PORT, () => {
+    server = httpServer.listen(env.PORT, () => {
       console.log(
         `✓ Server running on port ${env.PORT} (${env.NODE_ENV} mode)`
       );

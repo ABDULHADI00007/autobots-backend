@@ -45,6 +45,40 @@ const orderSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    cancellationRequested: {
+      type: Boolean,
+      default: false,
+    },
+    cancellationReason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    cancellationNotes: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    cancellationRequestedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    cancellationRequestedAt: {
+      type: Date,
+    },
+    cancellationDecision: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+    },
+    cancellationDecisionAt: {
+      type: Date,
+    },
+    cancellationAdminNotes: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     // Escrow flow fields
     deliveredAt: {
       type: Date,

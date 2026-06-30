@@ -1,4 +1,5 @@
 import { env } from "../config/env.js";
+import { StorageError } from "../config/storage/storage.errors.js";
 
 // ============================================================
 // ERROR HANDLING MIDDLEWARE
@@ -108,6 +109,20 @@ export const errorHandler = (err, req, res, next) => {
   if (err.status === 429) {
     statusCode = 429;
     errorCode = "RATE_LIMIT_EXCEEDED";
+  }
+
+  // Storage errors — production-safe messages (never expose bucket, SDK, or credentials)
+  if (err instanceof StorageError || err?.name?.startsWith?.("Storage")) {
+    const storageCodeMap = {
+      STORAGE_VALIDATION_ERROR:    400,
+      STORAGE_NOT_FOUND:           404,
+      STORAGE_AUTHORIZATION_ERROR: 403,
+      STORAGE_CONFIG_ERROR:        503,
+    };
+    statusCode = err.statusCode || storageCodeMap[err.code] || 500;
+    // Use the sanitized storage message — it never contains credentials or bucket names
+    message   = err.message || "A storage error occurred.";
+    errorCode = err.code    || "STORAGE_ERROR";
   }
 
   // In production, don't expose sensitive error details

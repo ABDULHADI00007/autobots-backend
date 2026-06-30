@@ -16,6 +16,7 @@ import { disputeEvidenceRouter, evidenceRouter } from "../modules/evidence/evide
 import investigationRoutes from "../modules/investigations/investigation.routes.js";
 import { orderTimelineRouter, disputeTimelineRouter } from "../modules/timeline/timeline.routes.js";
 import settingsRoutes from "../modules/settings/settings.routes.js";
+import notificationRoutes from "../modules/notifications/notification.routes.js";
 
 const router = Router();
 
@@ -38,6 +39,7 @@ router.use("/evidence", evidenceRouter);
 router.use("/attachments", attachmentRoutes);
 router.use("/messages", messageRoutes);
 router.use("/settings", settingsRoutes);
+router.use("/notifications", notificationRoutes);
 router.use("/", deliveryRoutes);
 
 export default router;

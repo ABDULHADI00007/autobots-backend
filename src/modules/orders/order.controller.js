@@ -1,5 +1,5 @@
 import { successResponse, errorResponse } from "../../utils/ApiResponse.js";
-import { checkoutSchema } from "./order.validation.js";
+import { checkoutSchema, requestCancellationSchema, adminCancellationSchema } from "./order.validation.js";
 import * as orderService from "./order.service.js";
 
 export const createCheckoutSession = async (req, res) => {
@@ -15,14 +15,17 @@ export const createCheckoutSession = async (req, res) => {
 
 export const stripeWebhook = async (req, res) => {
   const signature = req.headers["stripe-signature"];
-  console.log("[orders:webhook] request received", {
+  console.log("[orders:webhook] endpoint reached", {
+    path: req.path,
+    method: req.method,
     hasSignature: Boolean(signature),
     contentType: req.headers["content-type"],
     bodyType: Buffer.isBuffer(req.body) ? "buffer" : typeof req.body,
   });
 
   try {
-    await orderService.handleWebhook(req.body, signature);
+    const result = await orderService.handleWebhook(req.body, signature);
+    console.log("[orders:webhook] handler result", result);
     return res.status(200).json({ received: true });
   } catch (err) {
     console.error("[orders:webhook] request failed", err?.message || err, err?.stack || "");
@@ -120,6 +123,39 @@ export const requestRevision = async (req, res) => {
     const order = await orderService.requestRevision(req.params.id, req.user.userId, message);
     return successResponse(res, "Revision requested", order);
   } catch (err) {
+    return errorResponse(res, err.message, 400);
+  }
+};
+
+export const requestCancellation = async (req, res) => {
+  try {
+    const data = requestCancellationSchema.parse(req.body || {});
+    const order = await orderService.requestCancellation(req.params.id, req.user.userId, data);
+    return successResponse(res, "Cancellation request submitted", order);
+  } catch (err) {
+    if (err.name === "ZodError") return errorResponse(res, err.issues[0]?.message || "Validation failed", 400);
+    return errorResponse(res, err.message, 400);
+  }
+};
+
+export const approveCancellation = async (req, res) => {
+  try {
+    const { adminNotes } = adminCancellationSchema.parse(req.body || {});
+    const order = await orderService.approveCancellation(req.params.id, req.user.userId, adminNotes);
+    return successResponse(res, "Cancellation approved", order);
+  } catch (err) {
+    if (err.name === "ZodError") return errorResponse(res, err.issues[0]?.message || "Validation failed", 400);
+    return errorResponse(res, err.message, 400);
+  }
+};
+
+export const rejectCancellation = async (req, res) => {
+  try {
+    const { adminNotes } = adminCancellationSchema.parse(req.body || {});
+    const order = await orderService.rejectCancellation(req.params.id, req.user.userId, adminNotes);
+    return successResponse(res, "Cancellation rejected", order);
+  } catch (err) {
+    if (err.name === "ZodError") return errorResponse(res, err.issues[0]?.message || "Validation failed", 400);
     return errorResponse(res, err.message, 400);
   }
 };

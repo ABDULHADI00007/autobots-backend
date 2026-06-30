@@ -2,6 +2,7 @@ import { Router } from "express";
 import authMiddleware from "../../middleware/auth.middleware.js";
 import roleMiddleware from "../../middleware/role.middleware.js";
 import {
+  getBuyerDashboard,
   getOverview,
   getRevenue,
   getOrderStats,
@@ -14,6 +15,7 @@ import {
 
 const router = Router();
 
+router.get("/buyer", authMiddleware, roleMiddleware("buyer"), getBuyerDashboard);
 router.use(authMiddleware, roleMiddleware("admin"));
 
 router.get("/overview", getOverview);

@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import User from "../users/user.model.js";
 import SellerApplication from "../sellerApplications/sellerApplication.model.js";
 import Listing from "../listings/listing.model.js";
@@ -55,6 +56,36 @@ const getDateRange = ({ range = "30d", startDate, endDate } = {}) => {
 const formatMonthLabel = (year, month) => {
   const date = new Date(Date.UTC(year, month - 1, 1));
   return date.toLocaleString("en-US", { month: "short", year: "numeric" });
+};
+
+export const getBuyerDashboard = async (userId) => {
+  const buyerObjectId = new mongoose.Types.ObjectId(userId);
+
+  const [totalOrders, completedOrders, totalSpentResult, recentOrders] = await Promise.all([
+    Order.countDocuments({ buyerId: buyerObjectId }),
+    Order.countDocuments({ buyerId: buyerObjectId, status: "completed" }),
+    Order.aggregate([
+      { $match: { buyerId: buyerObjectId, status: "completed" } },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]),
+    Order.find({ buyerId: buyerObjectId })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .populate("listingId", "title slug price")
+      .populate("sellerId", "name email")
+      .lean(),
+  ]);
+
+  const totalSpent = totalSpentResult.length ? parseFloat(totalSpentResult[0].total.toFixed(2)) : 0;
+
+  return {
+    stats: {
+      totalOrders,
+      completedOrders,
+      totalSpent,
+    },
+    recentOrders,
+  };
 };
 
 export const getOverview = async () => {

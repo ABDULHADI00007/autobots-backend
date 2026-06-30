@@ -4,7 +4,10 @@ import ConversationParticipant from "../conversations/conversationParticipant.mo
 import Message from "../conversations/message.model.js";
 import Order from "../orders/order.model.js";
 import Dispute from "../disputes/dispute.model.js";
+import User from "../users/user.model.js";
+import { sendNewMessageEmailRecipient } from "../email/marketplace.email.js";
 import { getAttachmentsForParent } from "../attachments/attachment.service.js";
+import { emitMessageRead, emitMessageSent } from "../../socket/conversationSocket.js";
 
 const conversationProjection = "conversationType orderId disputeId lastMessagePreview lastMessageAt closedAt createdAt updatedAt";
 
@@ -330,14 +333,73 @@ export const sendMessage = async (conversationId, userId, userRole, body, type =
   });
 
   conversation.lastMessageAt = message.createdAt;
-  conversation.lastMessagePreview = safeBody.slice(0, 140);
+  conversation.lastMessagePreview = safeBody.slice(0, 140) || "Attachment";
   await conversation.save();
 
   participant.lastReadAt = message.createdAt;
   await participant.save();
 
+  const emittedMessage = {
+    ...message.toObject(),
+    senderId: message.senderId?.toString ? message.senderId.toString() : message.senderId,
+  };
+
+  // Get all participants so we can emit to their user rooms
+  const allParticipants = await ConversationParticipant.find({ conversationId: conversation._id });
+  const recipientUserIds = allParticipants
+    .filter(p => p.userId.toString() !== userId.toString())
+    .map(p => p.userId.toString());
+
+  await emitMessageSent(conversationId, emittedMessage, recipientUserIds);
+
+  // Create notifications for recipients (do not notify sender) - only if message is not empty
+  if (safeBody.trim().length > 0) {
+    try {
+      const NotificationService = await import("../notifications/notification.service.js");
+      for (const rid of recipientUserIds) {
+        try {
+          await NotificationService.createNotification({
+            userId: rid,
+            type: "message",
+            title: "New message",
+            message: safeBody.slice(0, 200),
+            referenceType: "message",
+            referenceId: conversation._id,
+          });
+        } catch (e) {
+          console.error("notify:sendMessage:recipient", e?.message || e);
+        }
+      }
+    } catch (e) {
+      console.error("notify:sendMessage", e?.message || e);
+    }
+
+    try {
+      const participants = await ConversationParticipant.find({
+        conversationId: conversation._id,
+        userId: { $in: recipientUserIds },
+      }).populate("userId", "name email");
+
+      const messagePreview = safeBody.slice(0, 120);
+      await Promise.allSettled(
+        participants
+          .filter((participant) => participant.userId?.email)
+          .map((participant) =>
+            sendNewMessageEmailRecipient({
+              recipient: participant.userId,
+              conversationId: conversation._id,
+              messagePreview,
+            })
+          )
+      );
+    } catch (e) {
+      console.error("email:sendMessage", e?.message || e);
+    }
+  }
+
   return message;
 };
+
 
 export const markConversationRead = async (conversationId, userId, userRole) => {
   if (!isObjectId(conversationId)) {
@@ -360,6 +422,8 @@ export const markConversationRead = async (conversationId, userId, userRole) => 
 
   participant.lastReadAt = new Date();
   await participant.save();
+
+  await emitMessageRead(conversationId, participant.toObject(), userId);
 
   return participant;
 };

@@ -4,6 +4,7 @@ import Order from "../orders/order.model.js";
 import Dispute from "../disputes/dispute.model.js";
 import Refund from "../refunds/refund.model.js";
 import { getPaginationValues, buildPaginationMeta } from "../../utils/pagination.js";
+import { storage, STORAGE_FOLDERS } from "../../config/storage/index.js";
 
 export const getProfile = async (userId) => {
   const user = await User.findById(userId).select("-password");
@@ -29,10 +30,197 @@ export const updateProfile = async (userId, data) => {
 };
 
 export const updateRole = async (userId, role) => {
-  if (!["buyer", "seller"].includes(role)) throw new Error("Invalid role");
+  if (![ "buyer", "seller"].includes(role)) throw new Error("Invalid role");
   const user = await User.findByIdAndUpdate(userId, { role }, { new: true }).select("-password");
   if (!user) throw new Error("User not found");
   return user;
+};
+
+// ============================================================
+// USER AVATAR
+// ============================================================
+
+/**
+ * Uploads or replaces a user's avatar via the Storage Engine.
+ * Transaction-safe: if DB update fails, the new S3 object is deleted.
+ *
+ * @param {string} userId
+ * @param {{ buffer: Buffer, mimeType: string, fileName: string, sizeBytes: number }} file
+ * @returns {Promise<object>} Updated user (no password)
+ */
+export const updateAvatar = async (userId, { buffer, mimeType, fileName, sizeBytes }) => {
+  const user = await User.findById(userId);
+  if (!user) throw new Error("User not found");
+
+  const previousKey = user.avatarKey || null;
+
+  const uploadResult = await storage.replace({
+    folder:      STORAGE_FOLDERS.AVATARS,
+    body:        buffer,
+    mimeType,
+    fileName,
+    sizeBytes,
+    previousKey,
+    constraints: {
+      allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
+      maxBytes: 5 * 1024 * 1024, // 5 MB
+    },
+    dbUpdateFn: async (result) => {
+      await User.findByIdAndUpdate(userId, {
+        avatarKey: result.key,
+        avatarUrl: result.url,
+      });
+    },
+  });
+
+  return User.findById(userId).select("-password");
+};
+
+/**
+ * Removes a user's avatar from S3 and clears the DB fields.
+ *
+ * @param {string} userId
+ * @returns {Promise<object>} Updated user (no password)
+ */
+export const deleteAvatar = async (userId) => {
+  const user = await User.findById(userId);
+  if (!user) throw new Error("User not found");
+  if (!user.avatarKey) throw new Error("No avatar to remove");
+
+  await User.findByIdAndUpdate(userId, { avatarKey: null, avatarUrl: null });
+
+  // Non-fatal: DB is already cleared, S3 cleanup is best-effort
+  try {
+    await storage.delete.one(user.avatarKey);
+  } catch (err) {
+    console.warn(`[STORAGE] Avatar cleanup failed for user ${userId}: ${err.message}`);
+  }
+
+  return User.findById(userId).select("-password");
+};
+
+// ============================================================
+// SELLER LOGO
+// ============================================================
+
+/**
+ * Uploads or replaces a seller's logo via the Storage Engine.
+ *
+ * @param {string} userId
+ * @param {{ buffer: Buffer, mimeType: string, fileName: string, sizeBytes: number }} file
+ * @returns {Promise<object>} Updated user (no password)
+ */
+export const updateSellerLogo = async (userId, { buffer, mimeType, fileName, sizeBytes }) => {
+  const user = await User.findById(userId);
+  if (!user) throw new Error("User not found");
+  if (user.role !== "seller") throw new Error("Only sellers can upload a logo");
+
+  const previousKey = user.sellerLogoKey || null;
+
+  await storage.replace({
+    folder:      STORAGE_FOLDERS.SELLER_LOGOS,
+    body:        buffer,
+    mimeType,
+    fileName,
+    sizeBytes,
+    previousKey,
+    constraints: {
+      allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/svg+xml"],
+      maxBytes: 5 * 1024 * 1024,
+    },
+    dbUpdateFn: async (result) => {
+      await User.findByIdAndUpdate(userId, {
+        sellerLogoKey: result.key,
+        sellerLogoUrl: result.url,
+      });
+    },
+  });
+
+  return User.findById(userId).select("-password");
+};
+
+/**
+ * Removes a seller's logo from S3 and clears the DB fields.
+ *
+ * @param {string} userId
+ * @returns {Promise<object>} Updated user (no password)
+ */
+export const deleteSellerLogo = async (userId) => {
+  const user = await User.findById(userId);
+  if (!user) throw new Error("User not found");
+  if (!user.sellerLogoKey) throw new Error("No logo to remove");
+
+  await User.findByIdAndUpdate(userId, { sellerLogoKey: null, sellerLogoUrl: null });
+
+  try {
+    await storage.delete.one(user.sellerLogoKey);
+  } catch (err) {
+    console.warn(`[STORAGE] Logo cleanup failed for user ${userId}: ${err.message}`);
+  }
+
+  return User.findById(userId).select("-password");
+};
+
+// ============================================================
+// SELLER BANNER
+// ============================================================
+
+/**
+ * Uploads or replaces a seller's banner via the Storage Engine.
+ *
+ * @param {string} userId
+ * @param {{ buffer: Buffer, mimeType: string, fileName: string, sizeBytes: number }} file
+ * @returns {Promise<object>} Updated user (no password)
+ */
+export const updateSellerBanner = async (userId, { buffer, mimeType, fileName, sizeBytes }) => {
+  const user = await User.findById(userId);
+  if (!user) throw new Error("User not found");
+  if (user.role !== "seller") throw new Error("Only sellers can upload a banner");
+
+  const previousKey = user.sellerBannerKey || null;
+
+  await storage.replace({
+    folder:      STORAGE_FOLDERS.SELLER_LOGOS, // reuse seller-logos folder, key prefix differs
+    body:        buffer,
+    mimeType,
+    fileName,
+    sizeBytes,
+    previousKey,
+    constraints: {
+      allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
+      maxBytes: 8 * 1024 * 1024, // 8 MB for banner
+    },
+    dbUpdateFn: async (result) => {
+      await User.findByIdAndUpdate(userId, {
+        sellerBannerKey: result.key,
+        sellerBannerUrl: result.url,
+      });
+    },
+  });
+
+  return User.findById(userId).select("-password");
+};
+
+/**
+ * Removes a seller's banner from S3 and clears the DB fields.
+ *
+ * @param {string} userId
+ * @returns {Promise<object>} Updated user (no password)
+ */
+export const deleteSellerBanner = async (userId) => {
+  const user = await User.findById(userId);
+  if (!user) throw new Error("User not found");
+  if (!user.sellerBannerKey) throw new Error("No banner to remove");
+
+  await User.findByIdAndUpdate(userId, { sellerBannerKey: null, sellerBannerUrl: null });
+
+  try {
+    await storage.delete.one(user.sellerBannerKey);
+  } catch (err) {
+    console.warn(`[STORAGE] Banner cleanup failed for user ${userId}: ${err.message}`);
+  }
+
+  return User.findById(userId).select("-password");
 };
 
 const toBuyerAdminSummary = (user, orders = [], disputes = [], refunds = []) => ({

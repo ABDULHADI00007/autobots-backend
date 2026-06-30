@@ -29,6 +29,30 @@ const STRIPE_SECRET_KEY = optional("STRIPE_SECRET_KEY", "");
 const STRIPE_WEBHOOK_SECRET = optional("STRIPE_WEBHOOK_SECRET", "");
 const ALLOWED_ORIGINS = optional("ALLOWED_ORIGINS", "");
 
+// Email infrastructure env vars (required for PHASE 10A)
+const RESEND_API_KEY = required("RESEND_API_KEY");
+const EMAIL_FROM_NAME = required("EMAIL_FROM_NAME");
+const EMAIL_FROM_ADDRESS = required("EMAIL_FROM_ADDRESS");
+
+// Storage (S3 / S3-compatible) — optional, validated at startup by storage.startup.js
+const AWS_ACCESS_KEY_ID      = optional("AWS_ACCESS_KEY_ID");
+const AWS_SECRET_ACCESS_KEY  = optional("AWS_SECRET_ACCESS_KEY");
+const AWS_REGION              = optional("AWS_REGION", "us-east-1");
+const AWS_S3_BUCKET           = optional("AWS_S3_BUCKET");
+const AWS_S3_ENDPOINT         = optional("AWS_S3_ENDPOINT");
+const AWS_S3_FORCE_PATH_STYLE = optional("AWS_S3_FORCE_PATH_STYLE") === "true";
+
+// Configurable signed URL TTL in seconds (default: 3600 = 1 hour, max: 604800 = 7 days)
+const SIGNED_URL_EXPIRY_SECONDS = Math.min(
+  parseInt(optional("SIGNED_URL_EXPIRY_SECONDS", "3600"), 10),
+  604800
+);
+
+// S3 is considered enabled only when all four required vars are present
+const isS3Enabled = Boolean(
+  AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY && AWS_REGION && AWS_S3_BUCKET
+);
+
 // Validation: JWT_SECRET should be at least 32 characters in production
 if (NODE_ENV === "production" && JWT_SECRET.length < 32) {
   console.warn(
@@ -57,5 +81,17 @@ export const env = {
   STRIPE_WEBHOOK_SECRET,
   ALLOWED_ORIGINS: ALLOWED_ORIGINS ? ALLOWED_ORIGINS.split(",").map((url) => url.trim()) : [],
   isDevelopment: NODE_ENV === "development",
-  isProduction: NODE_ENV === "production",
+  isProduction:  NODE_ENV === "production",
+  RESEND_API_KEY,
+  EMAIL_FROM_NAME,
+  EMAIL_FROM_ADDRESS,
+  // Storage / S3
+  AWS_ACCESS_KEY_ID,
+  AWS_SECRET_ACCESS_KEY,
+  AWS_REGION,
+  AWS_S3_BUCKET,
+  AWS_S3_ENDPOINT,
+  AWS_S3_FORCE_PATH_STYLE,
+  SIGNED_URL_EXPIRY_SECONDS,
+  isS3Enabled,
 };

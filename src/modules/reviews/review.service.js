@@ -2,6 +2,7 @@ import Review from "./review.model.js";
 import Order from "../orders/order.model.js";
 import Listing from "../listings/listing.model.js";
 import User from "../users/user.model.js";
+import { sendReviewReceivedEmailSeller } from "../email/marketplace.email.js";
 import { getPaginationValues } from "../../utils/pagination.js";
 
 const recalculateRating = async (listingId) => {
@@ -37,6 +38,32 @@ export const createReview = async (buyerId, { orderId, rating, comment }) => {
   });
 
   await recalculateRating(order.listingId);
+
+  // Notify seller about new review
+  try {
+    const NotificationService = await import("../notifications/notification.service.js");
+    try {
+      await NotificationService.createNotification({
+        userId: order.sellerId,
+        type: "review",
+        title: "New review received",
+        message: `You received a new review for order ${order._id}`,
+        referenceType: "review",
+        referenceId: review._id,
+      });
+    } catch (e) { console.error("notify:createReview:seller", e?.message || e); }
+  } catch (e) { console.error("notify:createReview", e?.message || e); }
+
+  try {
+    const seller = await User.findById(order.sellerId).select("name email");
+    await sendReviewReceivedEmailSeller({
+      seller,
+      order,
+      buyerName: order.buyerId?.name || "Buyer",
+    });
+  } catch (e) {
+    console.error("email:createReview", e?.message || e);
+  }
 
   return review;
 };

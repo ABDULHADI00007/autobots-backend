@@ -2,6 +2,12 @@ import mongoose from "mongoose";
 import Stripe from "stripe";
 import Dispute from "./dispute.model.js";
 import Order from "../orders/order.model.js";
+import User from "../users/user.model.js";
+import {
+  sendDisputeOpenedEmailSeller,
+  sendAdminDisputeOpenedEmail,
+  sendDisputeResolvedEmailParticipant,
+} from "../email/marketplace.email.js";
 import { env } from "../../config/env.js";
 import { createDisputeConversation } from "../messages/conversation.service.js";
 import TimelineEvent from "../timeline/timelineEvent.model.js";
@@ -80,6 +86,57 @@ export const createDispute = async ({ orderId, openerId, openerRole, reason }) =
       });
     } catch (err) {
       console.error("[disputes:timeline]", { disputeId: dispute._id, eventType: "DisputeOpened", error: err?.message || err });
+    }
+
+    // Notify seller and admins about the new dispute
+    try {
+      const NotificationService = await import("../notifications/notification.service.js");
+      try {
+        await NotificationService.createNotification({
+          userId: openerRole === "buyer" ? order.sellerId : order.buyerId,
+          type: "dispute",
+          title: "Dispute opened",
+          message: `A dispute was opened for order ${order._id}`,
+          referenceType: "dispute",
+          referenceId: dispute._id,
+        });
+      } catch (e) { console.error("notify:createDispute:participant", e?.message || e); }
+
+      try {
+        await NotificationService.createNotification({
+          userId: null,
+          broadcastAdmin: true,
+          type: "dispute",
+          title: "New dispute opened",
+          message: `Dispute ${dispute._id} opened for order ${order._id}`,
+          referenceType: "dispute",
+          referenceId: dispute._id,
+        });
+      } catch (e) { console.error("notify:createDispute:admin", e?.message || e); }
+    } catch (e) {
+      console.error("notify:createDispute", e?.message || e);
+    }
+
+    try {
+      const participant = openerRole === "buyer" ? await User.findById(order.sellerId).select("name email") : await User.findById(order.buyerId).select("name email");
+      if (participant?.email) {
+        await sendDisputeOpenedEmailSeller({
+          seller: participant,
+          order,
+          openerRole,
+        });
+      }
+    } catch (e) {
+      console.error("email:createDispute:participant", e?.message || e);
+    }
+
+    try {
+      await sendAdminDisputeOpenedEmail({
+        order,
+        openerRole,
+      });
+    } catch (e) {
+      console.error("email:createDispute:admin", e?.message || e);
     }
 
     return dispute;
@@ -237,6 +294,79 @@ export const resolveDisputeFinal = async (disputeId, decision, notes, adminId) =
       ]);
     } catch (err) {
       console.error("[disputes:timeline]", { disputeId, eventType: "DisputeResolved", error: err?.message || err });
+    }
+
+    // Notify participants about dispute resolution
+    try {
+      const NotificationService = await import("../notifications/notification.service.js");
+      const orderDoc = await Order.findById(dispute.orderId);
+      const buyerId = orderDoc?.buyerId;
+      const sellerId = orderDoc?.sellerId;
+
+      if (internalDecision === "release") {
+        // notify seller that funds were released
+        try {
+          await NotificationService.createNotification({
+            userId: sellerId,
+            type: "dispute",
+            title: "Dispute resolved — funds released",
+            message: `Dispute ${disputeId} resolved by admin. Funds released to seller.`,
+            referenceType: "dispute",
+            referenceId: disputeId,
+          });
+        } catch (e) { console.error("notify:dispute:release:seller", e?.message || e); }
+
+        try {
+          await NotificationService.createNotification({
+            userId: buyerId,
+            type: "dispute",
+            title: "Dispute resolved",
+            message: `Dispute ${disputeId} resolved by admin.`,
+            referenceType: "dispute",
+            referenceId: disputeId,
+          });
+        } catch (e) { console.error("notify:dispute:release:buyer", e?.message || e); }
+      } else {
+        // refund
+        try {
+          await NotificationService.createNotification({
+            userId: buyerId,
+            type: "refund",
+            title: "Refund issued",
+            message: `Refund issued for dispute ${disputeId}`,
+            referenceType: "dispute",
+            referenceId: disputeId,
+          });
+        } catch (e) { console.error("notify:dispute:refund:buyer", e?.message || e); }
+
+        try {
+          await NotificationService.createNotification({
+            userId: sellerId,
+            type: "dispute",
+            title: "Dispute resolved",
+            message: `Dispute ${disputeId} resolved by admin.`,
+            referenceType: "dispute",
+            referenceId: disputeId,
+          });
+        } catch (e) { console.error("notify:dispute:refund:seller", e?.message || e); }
+      }
+    } catch (e) {
+      console.error("notify:resolveDispute", e?.message || e);
+    }
+
+    try {
+      const orderDoc = await Order.findById(dispute.orderId).select("buyerId sellerId");
+      const [buyer, seller] = await Promise.all([
+        User.findById(orderDoc.buyerId).select("name email"),
+        User.findById(orderDoc.sellerId).select("name email"),
+      ]);
+
+      await Promise.allSettled([
+        buyer?.email && sendDisputeResolvedEmailParticipant({ recipient: buyer, order: orderDoc, decision, openerRole }),
+        seller?.email && sendDisputeResolvedEmailParticipant({ recipient: seller, order: orderDoc, decision, openerRole }),
+      ]);
+    } catch (e) {
+      console.error("email:resolveDispute", e?.message || e);
     }
 
     return dispute;

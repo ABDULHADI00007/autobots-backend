@@ -9,3 +9,12 @@ export const createOrderSchema = z.object({
 export const checkoutSchema = z.object({
   listingId: z.string().regex(objectIdRegex, "Invalid listing ID"),
 });
+
+export const requestCancellationSchema = z.object({
+  reason: z.string().trim().min(1, "Cancellation reason is required"),
+  notes: z.string().trim().optional().or(z.literal("")),
+});
+
+export const adminCancellationSchema = z.object({
+  adminNotes: z.string().trim().optional().or(z.literal("")),
+});

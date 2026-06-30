@@ -41,6 +41,47 @@ const sellerApplicationSchema = new mongoose.Schema(
       type: Number,
       default: 1,
     },
+    // ── Identity Document (S3) ─────────────────────────────────────
+    identityDocKey: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    identityDocUrl: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    identityDocType: {
+      type: String,
+      enum: ["cnic", "passport", "national_id", "other"],
+      default: null,
+    },
+    // ── Portfolio File (S3) ───────────────────────────────────────
+    portfolioFileKey: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    portfolioFileUrl: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    // ── Supporting Documents (S3) ────────────────────────────────
+    // Each entry: { key, url, label }
+    supportingDocKeys: {
+      type: [String],
+      default: [],
+    },
+    supportingDocUrls: {
+      type: [String],
+      default: [],
+    },
+    supportingDocLabels: {
+      type: [String],
+      default: [],
+    },
   },
   { timestamps: true }
 );

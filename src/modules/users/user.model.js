@@ -42,6 +42,63 @@ const userSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    emailVerified: {
+      type: Boolean,
+      default: false,
+    },
+    emailVerifiedAt: {
+      type: Date,
+      default: null,
+    },
+    emailVerificationToken: {
+      type: String,
+      default: null,
+    },
+    emailVerificationExpires: {
+      type: Date,
+      default: null,
+    },
+    passwordResetToken: {
+      type: String,
+      default: null,
+    },
+    passwordResetExpires: {
+      type: Date,
+      default: null,
+    },
+    // ── User Avatar (S3) ──────────────────────────────────────────
+    avatarKey: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    avatarUrl: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    // ── Seller Logo (S3) ─────────────────────────────────────────
+    sellerLogoKey: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    sellerLogoUrl: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    // ── Seller Banner (S3) ───────────────────────────────────────
+    sellerBannerKey: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    sellerBannerUrl: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     isSuspended: {
       type: Boolean,
       default: false,

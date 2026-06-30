@@ -5,6 +5,7 @@ import Order from "../orders/order.model.js";
 import Attachment from "../attachments/attachment.model.js";
 import TimelineEvent from "../timeline/timelineEvent.model.js";
 import User from "../users/user.model.js";
+import { storage } from "../../config/storage/index.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -312,18 +313,33 @@ export async function deleteEvidence(evidenceId, userId, role) {
     throw new Error("Access denied");
   }
 
-  // Clean up associated attachments (DB docs + physical files)
+  // Clean up associated attachments (DB docs + physical / S3 objects)
   if (evidence.attachmentIds && evidence.attachmentIds.length > 0) {
     const attachments = await Attachment.find({ _id: { $in: evidence.attachmentIds } });
+
     for (const att of attachments) {
-      if (att.storageProvider === "local" && att.storageKey) {
+      const provider = att.storageProvider || "local";
+
+      if (provider === "s3" && att.storageKey) {
+        // New evidence attachments — delete from Storage Engine
+        try {
+          await storage.delete.one(att.storageKey);
+          console.log(`[EVIDENCE] attachment S3 delete success key=${att.storageKey} evidenceId=${evidenceId}`);
+        } catch (err) {
+          // Non-fatal: DB record removed regardless; log for manual S3 cleanup
+          console.warn(`[EVIDENCE] attachment S3 delete warning key=${att.storageKey}: ${err?.message}`);
+        }
+      } else if (provider === "local" && att.storageKey) {
+        // Legacy evidence attachments uploaded before Phase 11C-5 — local filesystem cleanup
         try {
           const { unlink } = await import("fs/promises");
           const { default: path } = await import("path");
           await unlink(path.resolve(process.cwd(), "uploads", "attachments", att.storageKey));
         } catch (_) { /* ignore missing files */ }
       }
+      // provider === "link" → no storage object to remove
     }
+
     await Attachment.deleteMany({ _id: { $in: evidence.attachmentIds } });
   }
 

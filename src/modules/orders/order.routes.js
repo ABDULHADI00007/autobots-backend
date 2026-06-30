@@ -12,6 +12,9 @@ import {
   deliverOrder,
   approveDelivery,
   requestRevision,
+  requestCancellation,
+  approveCancellation,
+  rejectCancellation,
   adminReleaseFunds,
   adminRefundFunds,
 } from "./order.controller.js";
@@ -38,8 +41,15 @@ router.put("/:id/approve-delivery", authMiddleware, roleMiddleware("buyer"), app
 // Buyer requests revision
 router.put("/:id/request-revision", authMiddleware, roleMiddleware("buyer"), requestRevision);
 
+// Buyer requests cancellation for accepted orders
+router.put("/:id/request-cancellation", authMiddleware, roleMiddleware("buyer"), requestCancellation);
+
 // Cancel order
 router.put("/:id/cancel", authMiddleware, roleMiddleware("buyer"), cancelOrder);
+
+// Admin cancellation review
+router.put("/:id/cancellation/approve", authMiddleware, roleMiddleware("admin"), approveCancellation);
+router.put("/:id/cancellation/reject", authMiddleware, roleMiddleware("admin"), rejectCancellation);
 
 // Admin manual overrides
 router.put("/:id/release-funds", authMiddleware, roleMiddleware("admin"), adminReleaseFunds);

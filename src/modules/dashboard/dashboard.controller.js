@@ -1,6 +1,15 @@
 import { successResponse, errorResponse } from "../../utils/ApiResponse.js";
 import * as dashboardService from "./dashboard.service.js";
 
+export const getBuyerDashboard = async (req, res) => {
+  try {
+    const data = await dashboardService.getBuyerDashboard(req.user.userId);
+    return successResponse(res, "Buyer dashboard fetched successfully", data);
+  } catch (err) {
+    return errorResponse(res, err.message);
+  }
+};
+
 export const getOverview = async (req, res) => {
   try {
     const data = await dashboardService.getOverview();

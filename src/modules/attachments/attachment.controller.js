@@ -67,3 +67,41 @@ export const deleteAttachmentController = async (req, res) => {
     return errorResponse(res, err.message, statusCode);
   }
 };
+
+// ============================================================
+// SECURE DOWNLOAD — Authorized Signed URL
+// GET /:attachmentId/download
+//
+// Verifies:
+//   1. Attachment exists in DB
+//   2. User is authorized to access it (canAccessAttachment)
+//   3. StorageKey is valid
+//   4. Authorization check passes at the storage layer
+//
+// Returns a short-lived presigned URL.
+// Never returns a permanent bucket URL for private files.
+// ============================================================
+
+export const downloadAttachmentController = async (req, res) => {
+  try {
+    const params  = attachmentIdSchema.parse(req.params);
+    const payload = await attachmentService.getAttachmentDownloadUrl(
+      params.attachmentId,
+      req.user.userId,
+      req.user.role
+    );
+    return successResponse(res, "Download URL generated", payload, 200);
+  } catch (err) {
+    if (err.name === "ZodError") {
+      return errorResponse(res, err.issues[0]?.message || "Validation failed", 400);
+    }
+    const code = err?.code || "";
+    if (code === "STORAGE_AUTHORIZATION_ERROR" || err.message === "Access denied") {
+      return errorResponse(res, "You do not have permission to download this file.", 403);
+    }
+    if (code === "STORAGE_NOT_FOUND") {
+      return errorResponse(res, "File not found.", 404);
+    }
+    return errorResponse(res, err.message || "Failed to generate download URL.", 400);
+  }
+};

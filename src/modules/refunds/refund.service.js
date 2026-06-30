@@ -4,6 +4,12 @@ import Refund from "./refund.model.js";
 import Order from "../orders/order.model.js";
 import User from "../users/user.model.js";
 import TimelineEvent from "../timeline/timelineEvent.model.js";
+import {
+  sendAdminRefundRequestedEmail,
+  sendRefundApprovedEmailBuyer,
+  sendRefundRejectedEmailBuyer,
+  sendRefundDecisionEmailSeller,
+} from "../email/marketplace.email.js";
 import { env } from "../../config/env.js";
 import { getPaginationValues } from "../../utils/pagination.js";
 
@@ -44,6 +50,45 @@ export const createRefund = async (buyerId, { orderId, reason }) => {
     description: "The buyer submitted a refund request for this order.",
     payload: { reason },
   });
+
+  // Notify seller and admins about refund request
+  try {
+    const NotificationService = await import("../notifications/notification.service.js");
+    try {
+      await NotificationService.createNotification({
+        userId: order.sellerId,
+        type: "refund",
+        title: "Refund requested",
+        message: `Buyer requested a refund for order ${order._id}`,
+        referenceType: "refund",
+        referenceId: refund._id,
+      });
+    } catch (e) { console.error("notify:createRefund:seller", e?.message || e); }
+
+    try {
+      await NotificationService.createNotification({
+        userId: null,
+        broadcastAdmin: true,
+        type: "refund",
+        title: "New refund request",
+        message: `Refund ${refund._id} requested for order ${order._id}`,
+        referenceType: "refund",
+        referenceId: refund._id,
+      });
+    } catch (e) { console.error("notify:createRefund:admin", e?.message || e); }
+  } catch (e) {
+    console.error("notify:createRefund", e?.message || e);
+  }
+
+  try {
+    const buyer = await User.findById(order.buyerId).select("name email");
+    await sendAdminRefundRequestedEmail({
+      order,
+      buyerName: buyer?.name || "Buyer",
+    });
+  } catch (e) {
+    console.error("email:createRefund:adminRefundRequested", e?.message || e);
+  }
 
   return refund;
 };
@@ -256,6 +301,43 @@ export const approveRefund = async (refundId, adminNotes = "") => {
     await session.commitTransaction();
     session.endSession();
 
+    // Notify buyer that refund was approved and seller about admin decision
+    try {
+      const NotificationService = await import("../notifications/notification.service.js");
+      try {
+        await NotificationService.createNotification({
+          userId: refund.buyerId,
+          type: "refund",
+          title: "Refund approved",
+          message: `Your refund request ${refund._id} was approved by admin`,
+          referenceType: "refund",
+          referenceId: refund._id,
+        });
+      } catch (e) { console.error("notify:approveRefund:buyer", e?.message || e); }
+
+      try {
+        await NotificationService.createNotification({
+          userId: refund.sellerId,
+          type: "refund",
+          title: "Refund approved",
+          message: `Refund ${refund._id} was approved by admin`,
+          referenceType: "refund",
+          referenceId: refund._id,
+        });
+      } catch (e) { console.error("notify:approveRefund:seller", e?.message || e); }
+    } catch (e) { console.error("notify:approveRefund", e?.message || e); }
+
+    try {
+      const buyer = await User.findById(refund.buyerId).select("name email");
+      const seller = await User.findById(refund.sellerId).select("name email");
+      await Promise.allSettled([
+        sendRefundApprovedEmailBuyer({ buyer, order }),
+        sendRefundDecisionEmailSeller({ seller, order, decision: "approved" }),
+      ]);
+    } catch (e) {
+      console.error("email:approveRefund", e?.message || e);
+    }
+
     return refund;
   } catch (err) {
     await session.abortTransaction();
@@ -279,6 +361,44 @@ export const rejectRefund = async (refundId, adminNotes = "") => {
     description: "The refund request was rejected by an administrator.",
     visibility: "admin",
   });
+
+  // Notify buyer and seller about refund rejection
+  try {
+    const NotificationService = await import("../notifications/notification.service.js");
+    try {
+      await NotificationService.createNotification({
+        userId: refund.buyerId,
+        type: "refund",
+        title: "Refund rejected",
+        message: `Your refund request ${refund._id} was rejected by admin`,
+        referenceType: "refund",
+        referenceId: refund._id,
+      });
+    } catch (e) { console.error("notify:rejectRefund:buyer", e?.message || e); }
+
+    try {
+      await NotificationService.createNotification({
+        userId: refund.sellerId,
+        type: "refund",
+        title: "Refund rejected",
+        message: `Refund request ${refund._id} was rejected by admin`,
+        referenceType: "refund",
+        referenceId: refund._id,
+      });
+    } catch (e) { console.error("notify:rejectRefund:seller", e?.message || e); }
+  } catch (e) { console.error("notify:rejectRefund", e?.message || e); }
+
+  try {
+    const buyer = await User.findById(refund.buyerId).select("name email");
+    const seller = await User.findById(refund.sellerId).select("name email");
+    const order = await Order.findById(refund.orderId);
+    await Promise.allSettled([
+      sendRefundRejectedEmailBuyer({ buyer, order }),
+      sendRefundDecisionEmailSeller({ seller, order, decision: "rejected" }),
+    ]);
+  } catch (e) {
+    console.error("email:rejectRefund", e?.message || e);
+  }
 
   return refund;
 };

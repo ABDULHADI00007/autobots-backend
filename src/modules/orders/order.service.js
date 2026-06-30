@@ -1,8 +1,22 @@
 import Stripe from "stripe";
+import * as NotificationService from "../notifications/notification.service.js";
 import Order from "./order.model.js";
 import Listing from "../listings/listing.model.js";
 import Delivery from "../deliveries/delivery.model.js";
 import TimelineEvent from "../timeline/timelineEvent.model.js";
+import User from "../users/user.model.js";
+import {
+  sendOrderConfirmationEmail,
+  sendNewOrderEmailSeller,
+  sendOrderAcceptedEmailBuyer,
+  sendOrderDeliveredEmailBuyer,
+  sendRevisionRequestedEmailSeller,
+  sendCancellationRequestedEmailSeller,
+  sendAdminCancellationRequestedEmail,
+  sendCancellationApprovedEmailBuyer,
+  sendCancellationRejectedEmailBuyer,
+  sendRefundApprovedEmailBuyer,
+} from "../email/marketplace.email.js";
 import { env } from "../../config/env.js";
 import { createOrderConversation } from "../messages/conversation.service.js";
 import { createOrderDelivery as createDeliveryVersion } from "../deliveries/delivery.service.js";
@@ -46,13 +60,18 @@ export const createCheckoutSession = async (buyerId, { listingId }) => {
 // ── Webhook ──────────────────────────────────────────────────────────────────
 
 export const handleWebhook = async (rawBody, signature) => {
+  console.log("[orders:webhook] handleWebhook start", {
+    signaturePresent: Boolean(signature),
+    rawBodyLength: rawBody ? rawBody.length : 0,
+  });
+
   let event;
 
   try {
     event = stripe.webhooks.constructEvent(rawBody, signature, env.STRIPE_WEBHOOK_SECRET);
-    console.log("[orders:webhook] signature verification succeeded", { eventType: event.type, eventId: event.id });
+    console.log("[orders:webhook] Stripe event constructed", { eventType: event.type, eventId: event.id });
   } catch (err) {
-    console.error("[orders:webhook] signature verification failed", err?.message || err);
+    console.error("[orders:webhook] signature verification failed", err?.message || err, err?.stack || "");
     throw new Error("Webhook signature verification failed");
   }
 
@@ -60,29 +79,34 @@ export const handleWebhook = async (rawBody, signature) => {
     const session = event.data.object;
     console.log("[orders:webhook] checkout.session.completed received", {
       sessionId: session?.id,
-      paymentStatus: session?.payment_status,
-      amountTotal: session?.amount_total,
+      paymentIntent: session?.payment_intent,
+      customer: session?.customer,
+      metadata: session?.metadata,
       buyerId: session?.metadata?.buyerId,
       sellerId: session?.metadata?.sellerId,
       listingId: session?.metadata?.listingId,
-      stripeSessionId: session?.id,
+      amountTotal: session?.amount_total,
+      paymentStatus: session?.payment_status,
     });
 
     const duplicate = await Order.findOne({ stripeSessionId: session.id });
-    console.log("[orders:webhook] existingOrder found =", Boolean(duplicate));
-    if (duplicate) return { duplicate: true, processed: false };
+    console.log("[orders:webhook] duplicate check", { duplicate: Boolean(duplicate), stripeSessionId: session.id });
+    if (duplicate) {
+      console.log("[orders:webhook] skipping duplicate order creation", { stripeSessionId: session.id });
+      return { duplicate: true, processed: false };
+    }
 
     const { buyerId, sellerId, listingId } = session.metadata;
 
-    console.log("[orders:webhook] order creation started", {
+    console.log("[orders:webhook] creating order", {
       buyerId,
       sellerId,
       listingId,
       amount: session.amount_total / 100,
-      stripeSessionId: session.id,
+      status: "pending",
+      paymentStatus: "held",
     });
 
-    // Create order with funds held (escrow)
     try {
       const createdOrder = await Order.create({
         buyerId,
@@ -94,7 +118,12 @@ export const handleWebhook = async (rawBody, signature) => {
         stripePaymentIntentId: session.payment_intent || "",
         status: "pending",
       });
-      console.log("[orders:webhook] order creation success", { orderId: createdOrder._id?.toString?.() || createdOrder._id });
+      console.log("[orders:webhook] order creation success", {
+        orderId: createdOrder._id?.toString?.() || createdOrder._id,
+        buyerId: createdOrder.buyerId,
+        sellerId: createdOrder.sellerId,
+        listingId: createdOrder.listingId,
+      });
 
       try {
         await TimelineEvent.create({
@@ -111,7 +140,43 @@ export const handleWebhook = async (rawBody, signature) => {
         await createOrderConversation(createdOrder._id);
         console.log("[orders:webhook] order conversation created", { orderId: createdOrder._id?.toString?.() });
       } catch (convErr) {
-        console.error("[orders:webhook] order conversation creation failed (non-fatal)", convErr?.message || convErr);
+        console.error("[orders:webhook] order conversation creation failed (non-fatal)", convErr?.message || convErr, convErr?.stack || "");
+      }
+
+      // Notify seller about the new order
+      try {
+        await NotificationService.createNotification({
+          userId: createdOrder.sellerId,
+          type: "order",
+          title: "New order received",
+          message: `A new order has been placed for your listing`,
+          referenceType: "order",
+          referenceId: createdOrder._id,
+        });
+      } catch (e) {
+        console.error("notify:newOrder:seller", e?.message || e);
+      }
+
+      try {
+        const buyer = await User.findById(createdOrder.buyerId).select("name email");
+        const seller = await User.findById(createdOrder.sellerId).select("name email");
+        await Promise.allSettled([
+          sendOrderConfirmationEmail({
+            buyer,
+            order: createdOrder,
+            listingTitle: listing.title,
+            amount: createdOrder.amount,
+          }),
+          sendNewOrderEmailSeller({
+            seller,
+            order: createdOrder,
+            listingTitle: listing.title,
+            amount: createdOrder.amount,
+            buyerName: buyer?.name || "Buyer",
+          }),
+        ]);
+      } catch (e) {
+        console.error("email:newOrder", e?.message || e);
       }
 
       return { duplicate: false, processed: true, orderId: createdOrder._id?.toString?.() || createdOrder._id };
@@ -120,6 +185,7 @@ export const handleWebhook = async (rawBody, signature) => {
         console.log("[orders:webhook] duplicate order prevented by unique index", {
           stripeSessionId: session.id,
           stripePaymentIntentId: session.payment_intent || "",
+          error: err?.message,
         });
         return { duplicate: true, processed: false };
       }
@@ -230,8 +296,36 @@ export const acceptOrder = async (orderId, sellerId) => {
     description: "Seller accepted the order and committed to delivery.",
     visibility: "participants",
   });
+
+  // Notify buyer that seller accepted the order
+  try {
+    await NotificationService.createNotification({
+      userId: saved.buyerId,
+      type: "order",
+      title: "Seller accepted your order",
+      message: `Seller accepted order ${saved._id}`,
+      referenceType: "order",
+      referenceId: saved._id,
+    });
+  } catch (e) {
+    console.error("notify:acceptOrder", e?.message || e);
+  }
+
+  try {
+    const buyer = await User.findById(saved.buyerId).select("name email");
+    const seller = await User.findById(saved.sellerId).select("name email");
+    await sendOrderAcceptedEmailBuyer({
+      buyer,
+      order: saved,
+      sellerName: seller?.name || "Seller",
+    });
+  } catch (e) {
+    console.error("email:acceptOrder", e?.message || e);
+  }
+
   return saved;
 };
+
 
 export const deliverOrder = async (orderId, sellerId, deliveryNotes) => {
   const order = await Order.findById(orderId);
@@ -247,6 +341,32 @@ export const deliverOrder = async (orderId, sellerId, deliveryNotes) => {
     summaryNotes: deliveryNotes || "",
     links: [],
   });
+
+  // Notify buyer that seller delivered the order
+  try {
+    await NotificationService.createNotification({
+      userId: payload.order.buyerId,
+      type: "order",
+      title: "Order delivered",
+      message: `Seller delivered order ${payload.order._id}`,
+      referenceType: "order",
+      referenceId: payload.order._id,
+    });
+  } catch (e) {
+    console.error("notify:deliverOrder", e?.message || e);
+  }
+
+  try {
+    const buyer = await User.findById(payload.order.buyerId).select("name email");
+    const seller = await User.findById(payload.order.sellerId).select("name email");
+    await sendOrderDeliveredEmailBuyer({
+      buyer,
+      order: payload.order,
+      sellerName: seller?.name || "Seller",
+    });
+  } catch (e) {
+    console.error("email:deliverOrder", e?.message || e);
+  }
 
   return payload.order;
 };
@@ -298,8 +418,22 @@ export const approveDelivery = async (orderId, buyerId) => {
     visibility: "participants",
   });
 
+  // Notify seller that order is completed
+  try {
+    await NotificationService.createNotification({
+      userId: order.sellerId,
+      type: "order",
+      title: "Order completed",
+      message: `Order ${order._id} was completed by the buyer`,
+      referenceType: "order",
+      referenceId: order._id,
+    });
+  } catch (e) {
+    console.error("notify:approveDelivery", e?.message || e);
+  }
   return saved;
 };
+
 
 
 export const requestRevision = async (orderId, buyerId, message) => {
@@ -339,7 +473,35 @@ export const requestRevision = async (orderId, buyerId, message) => {
     visibility: "participants",
   });
 
-  return order.save();
+  const saved = await order.save();
+
+  // Notify seller that buyer requested a revision
+  try {
+    await NotificationService.createNotification({
+      userId: saved.sellerId,
+      type: "order",
+      title: "Revision requested",
+      message: `Buyer requested a revision for order ${saved._id}`,
+      referenceType: "order",
+      referenceId: saved._id,
+    });
+  } catch (e) {
+    console.error("notify:requestRevision", e?.message || e);
+  }
+
+  try {
+    const seller = await User.findById(saved.sellerId).select("name email");
+    const buyer = await User.findById(saved.buyerId).select("name email");
+    await sendRevisionRequestedEmailSeller({
+      seller,
+      order: saved,
+      buyerName: buyer?.name || "Buyer",
+    });
+  } catch (e) {
+    console.error("email:requestRevision", e?.message || e);
+  }
+
+  return saved;
 };
 
 
@@ -415,46 +577,7 @@ export const adminReleaseFunds = async (orderId, session = null) => {
   return savedRelease;
 };
 
-export const adminRefundFunds = async (orderId, session = null) => {
-  const order = await Order.findById(orderId).session(session);
-  if (!order) throw new Error("Order not found");
-  if (order.paymentStatus !== "held") throw new Error("Only held payments can be refunded");
-  if (!["delivered", "disputed"].includes(order.status)) {
-    throw new Error("Only delivered or disputed orders can be refunded");
-  }
-
-  if (order.stripePaymentIntentId) {
-    try {
-      await stripe.refunds.create({ payment_intent: order.stripePaymentIntentId });
-    } catch (err) {
-      throw new Error("Stripe refund failed: " + (err.message || err));
-    }
-  }
-
-  order.paymentStatus = "refunded";
-  order.status = "cancelled";
-  order.adminDecisionAt = new Date();
-  const savedRefund = await order.save({ session });
-  try {
-    await TimelineEvent.create({
-      scopeType: "order", scopeId: orderId,
-      eventType: "AdminFundsRefunded", actorId: null,
-      title: "Funds refunded by admin",
-      description: "Admin manually issued a refund to buyer.",
-      visibility: "participants",
-    });
-  } catch (_) {}
-  return savedRefund;
-};
-
-export const cancelOrder = async (orderId, userId) => {
-  const order = await Order.findById(orderId);
-  if (!order) throw new Error("Order not found");
-  // Allow buyer to cancel only when pending or accepted (per business rules)
-  if (order.buyerId.toString() !== userId) throw new Error("Access denied");
-  if (!["pending", "accepted"].includes(order.status)) throw new Error("Only pending/accepted orders can be cancelled");
-
-  // Refund if payment held
+const refundHeldOrder = async (order, actorId = null) => {
   if (order.paymentStatus === "held") {
     if (order.stripePaymentIntentId) {
       try {
@@ -467,13 +590,261 @@ export const cancelOrder = async (orderId, userId) => {
   }
 
   order.status = "cancelled";
+  order.adminDecisionAt = new Date();
   const saved = await order.save();
+
   await TimelineEvent.create({
-    scopeType: "order", scopeId: orderId,
-    eventType: "OrderCancelled", actorId: userId,
+    scopeType: "order", scopeId: order._id,
+    eventType: "OrderCancelled", actorId,
     title: "Order cancelled",
     description: "Order was cancelled.",
     visibility: "participants",
   });
+
+  return saved;
+};
+
+export const adminRefundFunds = async (orderId, session = null) => {
+  const order = await Order.findById(orderId).session(session);
+  if (!order) throw new Error("Order not found");
+  if (order.paymentStatus !== "held") throw new Error("Only held payments can be refunded");
+  if (!["delivered", "disputed"].includes(order.status)) {
+    throw new Error("Only delivered or disputed orders can be refunded");
+  }
+
+  const savedRefund = await refundHeldOrder(order, null);
+  try {
+    await TimelineEvent.create({
+      scopeType: "order", scopeId: orderId,
+      eventType: "AdminFundsRefunded", actorId: null,
+      title: "Funds refunded by admin",
+      description: "Admin manually issued a refund to buyer.",
+      visibility: "participants",
+    });
+  } catch (_) {}
+  // Notify buyer that refund was processed by admin
+  try {
+    await NotificationService.createNotification({
+      userId: savedRefund.buyerId,
+      type: "refund",
+      title: "Refund processed",
+      message: `A refund was issued for order ${savedRefund._id}`,
+      referenceType: "order",
+      referenceId: savedRefund._id,
+    });
+  } catch (e) {
+    console.error("notify:adminRefundFunds", e?.message || e);
+  }
+
+  try {
+    const buyer = await User.findById(savedRefund.buyerId).select("name email");
+    await sendRefundApprovedEmailBuyer({ buyer, order: savedRefund });
+  } catch (e) {
+    console.error("email:adminRefundFunds", e?.message || e);
+  }
+
+  return savedRefund;
+};
+
+export const requestCancellation = async (orderId, buyerId, { reason, notes }) => {
+  const order = await Order.findById(orderId);
+  if (!order) throw new Error("Order not found");
+  if (order.buyerId.toString() !== buyerId) throw new Error("Access denied");
+  if (order.status !== "accepted") throw new Error("Cancellation requests can only be submitted for accepted orders");
+  if (order.cancellationRequested && order.cancellationDecision === "pending") {
+    throw new Error("A cancellation request is already pending for this order");
+  }
+
+  order.cancellationRequested = true;
+  order.cancellationReason = reason;
+  order.cancellationNotes = notes || "";
+  order.cancellationRequestedBy = buyerId;
+  order.cancellationRequestedAt = new Date();
+  order.cancellationDecision = "pending";
+  order.cancellationDecisionAt = undefined;
+  order.cancellationAdminNotes = "";
+
+  const saved = await order.save();
+  await TimelineEvent.create({
+    scopeType: "order", scopeId: order._id,
+    eventType: "CancellationRequested", actorId: buyerId,
+    title: "Cancellation requested",
+    description: "Buyer submitted a cancellation request.",
+    payload: { reason, notes },
+    visibility: "participants",
+  });
+  // Notify seller that buyer requested cancellation
+  try {
+    await NotificationService.createNotification({
+      userId: saved.sellerId,
+      type: "order",
+      title: "Cancellation requested",
+      message: `Buyer requested cancellation for order ${saved._id}`,
+      referenceType: "order",
+      referenceId: saved._id,
+    });
+  } catch (e) {
+    console.error("notify:requestCancellation", e?.message || e);
+  }
+
+  try {
+    const seller = await User.findById(saved.sellerId).select("name email");
+    const buyer = await User.findById(saved.buyerId).select("name email");
+    await sendCancellationRequestedEmailSeller({
+      seller,
+      order: saved,
+      buyerName: buyer?.name || "Buyer",
+    });
+  } catch (e) {
+    console.error("email:requestCancellation", e?.message || e);
+  }
+
+  // Notify admin about cancellation request
+  try {
+    await NotificationService.createNotification({
+      userId: null,
+      broadcastAdmin: true,
+      type: "order",
+      title: "Cancellation request submitted",
+      message: `Buyer submitted a cancellation request for order ${saved._id}`,
+      referenceType: "order",
+      referenceId: saved._id,
+    });
+  } catch (e) {
+    console.error("notify:requestCancellation:admin", e?.message || e);
+  }
+
+  try {
+    await sendAdminCancellationRequestedEmail({
+      order: saved,
+      buyerName: buyer?.name || "Buyer",
+    });
+  } catch (e) {
+    console.error("email:requestCancellation:admin", e?.message || e);
+  }
+
+  return saved;
+};
+
+export const approveCancellation = async (orderId, adminId, adminNotes = "") => {
+  const order = await Order.findById(orderId);
+  if (!order) throw new Error("Order not found");
+  if (!order.cancellationRequested || order.cancellationDecision !== "pending") {
+    throw new Error("No pending cancellation request exists for this order");
+  }
+  if (order.status !== "accepted") {
+    throw new Error("Only accepted orders with a pending cancellation request can be approved");
+  }
+
+  order.cancellationDecision = "approved";
+  order.cancellationDecisionAt = new Date();
+  order.cancellationAdminNotes = adminNotes;
+  await order.save();
+
+  const saved = await refundHeldOrder(order, adminId);
+  await TimelineEvent.create({
+    scopeType: "order", scopeId: saved._id,
+    eventType: "CancellationApproved", actorId: adminId,
+    title: "Cancellation approved",
+    description: "An administrator approved the cancellation request.",
+    payload: { adminNotes },
+    visibility: "participants",
+  });
+  // Notify buyer that cancellation was approved
+  try {
+    await NotificationService.createNotification({
+      userId: saved.buyerId,
+      type: "order",
+      title: "Cancellation approved",
+      message: `Your cancellation for order ${saved._id} was approved`,
+      referenceType: "order",
+      referenceId: saved._id,
+    });
+  } catch (e) { console.error("notify:approveCancellation:buyer", e?.message || e); }
+  // Notify seller about admin decision
+  try {
+    await NotificationService.createNotification({
+      userId: saved.sellerId,
+      type: "order",
+      title: "Cancellation approved",
+      message: `Cancellation for order ${saved._id} was approved by admin`,
+      referenceType: "order",
+      referenceId: saved._id,
+    });
+  } catch (e) { console.error("notify:approveCancellation:seller", e?.message || e); }
+
+  try {
+    const buyer = await User.findById(saved.buyerId).select("name email");
+    await sendCancellationApprovedEmailBuyer({ buyer, order: saved });
+  } catch (e) {
+    console.error("email:approveCancellation", e?.message || e);
+  }
+
+  return saved;
+};
+
+export const rejectCancellation = async (orderId, adminId, adminNotes = "") => {
+  const order = await Order.findById(orderId);
+  if (!order) throw new Error("Order not found");
+  if (!order.cancellationRequested || order.cancellationDecision !== "pending") {
+    throw new Error("No pending cancellation request exists for this order");
+  }
+  if (order.status !== "accepted") {
+    throw new Error("Only accepted orders with a pending cancellation request can be rejected");
+  }
+
+  order.cancellationDecision = "rejected";
+  order.cancellationDecisionAt = new Date();
+  order.cancellationAdminNotes = adminNotes;
+  const saved = await order.save();
+
+  await TimelineEvent.create({
+    scopeType: "order", scopeId: order._id,
+    eventType: "CancellationRejected", actorId: adminId,
+    title: "Cancellation rejected",
+    description: "An administrator rejected the cancellation request.",
+    payload: { adminNotes },
+    visibility: "participants",
+  });
+  // Notify buyer that cancellation was rejected
+  try {
+    await NotificationService.createNotification({
+      userId: saved.buyerId,
+      type: "order",
+      title: "Cancellation rejected",
+      message: `Your cancellation for order ${saved._id} was rejected by admin`,
+      referenceType: "order",
+      referenceId: saved._id,
+    });
+  } catch (e) { console.error("notify:rejectCancellation:buyer", e?.message || e); }
+  // Notify seller about admin decision
+  try {
+    await NotificationService.createNotification({
+      userId: saved.sellerId,
+      type: "order",
+      title: "Cancellation rejected",
+      message: `Cancellation for order ${saved._id} was rejected by admin`,
+      referenceType: "order",
+      referenceId: saved._id,
+    });
+  } catch (e) { console.error("notify:rejectCancellation:seller", e?.message || e); }
+
+  try {
+    const buyer = await User.findById(saved.buyerId).select("name email");
+    await sendCancellationRejectedEmailBuyer({ buyer, order: saved });
+  } catch (e) {
+    console.error("email:rejectCancellation", e?.message || e);
+  }
+
+  return saved;
+};
+
+export const cancelOrder = async (orderId, userId) => {
+  const order = await Order.findById(orderId);
+  if (!order) throw new Error("Order not found");
+  if (order.buyerId.toString() !== userId) throw new Error("Access denied");
+  if (order.status !== "pending") throw new Error("Only pending orders can be cancelled directly");
+
+  const saved = await refundHeldOrder(order, userId);
   return saved;
 };

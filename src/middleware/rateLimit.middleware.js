@@ -1,4 +1,4 @@
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 
 // ============================================================
 // RATE LIMITING CONFIGURATION
@@ -17,7 +17,7 @@ export const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => isDev || req.path === "/health",
-  keyGenerator: (req) => req.ip || req.connection.remoteAddress,
+  keyGenerator: ipKeyGenerator,
 });
 
 // Relaxed limiter for public read-only GET endpoints
@@ -30,7 +30,7 @@ export const readLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: () => isDev,
-  keyGenerator: (req) => req.ip || req.connection.remoteAddress,
+  keyGenerator: ipKeyGenerator,
 });
 
 // Strict rate limiter for login attempts - 5 requests per 15 minutes
@@ -44,7 +44,7 @@ export const loginLimiter = rateLimit({
   skipSuccessfulRequests: true, // Don't count successful requests
   keyGenerator: (req) => {
     // Use email + IP to prevent enumeration attacks
-    return `${req.body?.email || "unknown"}:${req.ip}`;
+    return `${req.body?.email || "unknown"}:${ipKeyGenerator(req)}`;
   },
 });
 
@@ -58,7 +58,7 @@ export const registerLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => {
     // Use email + IP
-    return `${req.body?.email || "unknown"}:${req.ip}`;
+    return `${req.body?.email || "unknown"}:${ipKeyGenerator(req)}`;
   },
 });
 

@@ -1,5 +1,20 @@
-import { registerSchema, loginSchema } from "./auth.validation.js";
-import { registerUser, loginUser, getCurrentUser } from "./auth.service.js";
+import {
+  registerSchema,
+  loginSchema,
+  verifyEmailSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+  changePasswordSchema,
+} from "./auth.validation.js";
+import {
+  registerUser,
+  loginUser,
+  getCurrentUser,
+  verifyEmailToken,
+  requestPasswordReset,
+  resetPassword as resetPasswordService,
+  changePassword as changePasswordService,
+} from "./auth.service.js";
 import { successResponse, errorResponse } from "../../utils/ApiResponse.js";
 import User from "../users/user.model.js";
 import generateToken from "../../utils/generateToken.js";
@@ -31,6 +46,62 @@ export const login = async (req, res) => {
     }
 
     return errorResponse(res, error.message || "Login failed", 401);
+  }
+};
+
+export const verifyEmail = async (req, res) => {
+  try {
+    const validatedData = verifyEmailSchema.parse(req.query);
+    await verifyEmailToken(validatedData.token);
+    return successResponse(res, "Email verified successfully", null, 200);
+  } catch (error) {
+    if (error.name === "ZodError") {
+      return errorResponse(res, error.issues[0]?.message || "Validation failed", 400);
+    }
+
+    return errorResponse(res, error.message || "Email verification failed", 400);
+  }
+};
+
+export const forgotPassword = async (req, res) => {
+  try {
+    const validatedData = forgotPasswordSchema.parse(req.body);
+    await requestPasswordReset(validatedData.email);
+    return successResponse(res, "Password reset instructions sent if the account exists", null, 200);
+  } catch (error) {
+    if (error.name === "ZodError") {
+      return errorResponse(res, error.issues[0]?.message || "Validation failed", 400);
+    }
+
+    return errorResponse(res, error.message || "Forgot password request failed", 400);
+  }
+};
+
+export const resetPasswordController = async (req, res) => {
+  try {
+    const validatedData = resetPasswordSchema.parse(req.body);
+    await resetPasswordService(validatedData.token, validatedData.password);
+    return successResponse(res, "Password reset successfully", null, 200);
+  } catch (error) {
+    if (error.name === "ZodError") {
+      return errorResponse(res, error.issues[0]?.message || "Validation failed", 400);
+    }
+
+    return errorResponse(res, error.message || "Password reset failed", 400);
+  }
+};
+
+export const changePasswordController = async (req, res) => {
+  try {
+    const validatedData = changePasswordSchema.parse(req.body);
+    await changePasswordService(req.user.userId, validatedData.currentPassword, validatedData.newPassword);
+    return successResponse(res, "Password changed successfully", null, 200);
+  } catch (error) {
+    if (error.name === "ZodError") {
+      return errorResponse(res, error.issues[0]?.message || "Validation failed", 400);
+    }
+
+    return errorResponse(res, error.message || "Password change failed", 400);
   }
 };
 

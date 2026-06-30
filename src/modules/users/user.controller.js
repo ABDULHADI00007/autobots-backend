@@ -1,8 +1,14 @@
-import { profileUpdateSchema, buyerAdminNoteSchema, buyerSuspendSchema, buyerAdminListSchema } from "./user.validation.js";
+import { profileUpdateSchema, avatarUploadSchema, logoUploadSchema, bannerUploadSchema, buyerAdminNoteSchema, buyerSuspendSchema, buyerAdminListSchema } from "./user.validation.js";
 import {
   getProfile,
   updateProfile,
   updateRole,
+  updateAvatar,
+  deleteAvatar,
+  updateSellerLogo,
+  deleteSellerLogo,
+  updateSellerBanner,
+  deleteSellerBanner,
   getAdminUsers,
   getAdminSellers,
   getAdminSellerById,
@@ -149,5 +155,92 @@ export const unverifySellerController = async (req, res) => {
     return successResponse(res, "Seller verification removed", seller, 200);
   } catch (error) {
     return errorResponse(res, error.message || "Failed to update seller verification", 400);
+  }
+};
+
+// ============================================================
+// MEDIA UPLOAD CONTROLLERS
+// Decode base64 content, delegate to service, return updated profile.
+// All S3 work happens inside user.service.js via the Storage Engine.
+// ============================================================
+
+function decodeUploadBody(body, schema) {
+  const parsed = schema.parse(body);
+  const raw = parsed.contentBase64.includes(",")
+    ? parsed.contentBase64.split(",").pop()
+    : parsed.contentBase64;
+  const buffer = Buffer.from(raw, "base64");
+  return { buffer, mimeType: parsed.mimeType, fileName: parsed.fileName, sizeBytes: parsed.sizeBytes };
+}
+
+// ── Avatar ───────────────────────────────────────────────────
+
+export const uploadAvatarController = async (req, res) => {
+  try {
+    const file = decodeUploadBody(req.body, avatarUploadSchema);
+    const user = await updateAvatar(req.user.userId, file);
+    return successResponse(res, "Avatar updated successfully", user, 200);
+  } catch (err) {
+    if (err.name === "ZodError") return errorResponse(res, err.issues[0]?.message || "Validation failed", 400);
+    const code = err?.code || "";
+    const status = code === "STORAGE_VALIDATION_ERROR" ? 400 : code === "STORAGE_CONFIG_ERROR" ? 503 : 400;
+    return errorResponse(res, err.message || "Failed to upload avatar", status);
+  }
+};
+
+export const removeAvatarController = async (req, res) => {
+  try {
+    const user = await deleteAvatar(req.user.userId);
+    return successResponse(res, "Avatar removed successfully", user, 200);
+  } catch (err) {
+    return errorResponse(res, err.message || "Failed to remove avatar", 400);
+  }
+};
+
+// ── Seller Logo ──────────────────────────────────────────
+
+export const uploadLogoController = async (req, res) => {
+  try {
+    const file = decodeUploadBody(req.body, logoUploadSchema);
+    const user = await updateSellerLogo(req.user.userId, file);
+    return successResponse(res, "Logo updated successfully", user, 200);
+  } catch (err) {
+    if (err.name === "ZodError") return errorResponse(res, err.issues[0]?.message || "Validation failed", 400);
+    const code = err?.code || "";
+    const status = code === "STORAGE_VALIDATION_ERROR" ? 400 : code === "STORAGE_CONFIG_ERROR" ? 503 : 400;
+    return errorResponse(res, err.message || "Failed to upload logo", status);
+  }
+};
+
+export const removeLogoController = async (req, res) => {
+  try {
+    const user = await deleteSellerLogo(req.user.userId);
+    return successResponse(res, "Logo removed successfully", user, 200);
+  } catch (err) {
+    return errorResponse(res, err.message || "Failed to remove logo", 400);
+  }
+};
+
+// ── Seller Banner ───────────────────────────────────────
+
+export const uploadBannerController = async (req, res) => {
+  try {
+    const file = decodeUploadBody(req.body, bannerUploadSchema);
+    const user = await updateSellerBanner(req.user.userId, file);
+    return successResponse(res, "Banner updated successfully", user, 200);
+  } catch (err) {
+    if (err.name === "ZodError") return errorResponse(res, err.issues[0]?.message || "Validation failed", 400);
+    const code = err?.code || "";
+    const status = code === "STORAGE_VALIDATION_ERROR" ? 400 : code === "STORAGE_CONFIG_ERROR" ? 503 : 400;
+    return errorResponse(res, err.message || "Failed to upload banner", status);
+  }
+};
+
+export const removeBannerController = async (req, res) => {
+  try {
+    const user = await deleteSellerBanner(req.user.userId);
+    return successResponse(res, "Banner removed successfully", user, 200);
+  } catch (err) {
+    return errorResponse(res, err.message || "Failed to remove banner", 400);
   }
 };

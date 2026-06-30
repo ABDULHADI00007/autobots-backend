@@ -5,6 +5,12 @@ import {
   getProfileController,
   updateProfileController,
   updateRoleController,
+  uploadAvatarController,
+  removeAvatarController,
+  uploadLogoController,
+  removeLogoController,
+  uploadBannerController,
+  removeBannerController,
   getAdminUsersController,
   getAdminSellersController,
   getAdminSellerByIdController,
@@ -19,10 +25,25 @@ import {
 
 const router = Router();
 
+// ── Existing profile routes (unchanged) ───────────────────────────────
 router.get("/profile", authMiddleware, getProfileController);
 router.put("/profile", authMiddleware, updateProfileController);
 router.put("/role", authMiddleware, updateRoleController);
 
+// ── Media upload routes (new — S3 only) ────────────────────────────
+// Avatar (all roles)
+router.put("/profile/avatar",    authMiddleware, uploadAvatarController);
+router.delete("/profile/avatar", authMiddleware, removeAvatarController);
+
+// Seller logo (sellers only)
+router.put("/profile/logo",    authMiddleware, roleMiddleware("seller"), uploadLogoController);
+router.delete("/profile/logo", authMiddleware, roleMiddleware("seller"), removeLogoController);
+
+// Seller banner (sellers only)
+router.put("/profile/banner",    authMiddleware, roleMiddleware("seller"), uploadBannerController);
+router.delete("/profile/banner", authMiddleware, roleMiddleware("seller"), removeBannerController);
+
+// ── Admin routes (unchanged) ─────────────────────────────────────
 router.get("/admin/admins", authMiddleware, roleMiddleware("admin"), getAdminUsersController);
 router.get("/admin/sellers", authMiddleware, roleMiddleware("admin"), getAdminSellersController);
 router.get("/admin/sellers/:userId", authMiddleware, roleMiddleware("admin"), getAdminSellerByIdController);

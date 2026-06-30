@@ -14,10 +14,18 @@ import {
   requestChangesListingController,
   hideListingController,
   unhideListingController,
+  uploadThumbnailController,
+  removeThumbnailController,
+  addGalleryImageController,
+  removeGalleryImageController,
+  reorderGalleryController,
+  uploadListingMediaController,
+  deleteListingMediaController,
 } from "./listing.controller.js";
 
 const router = Router();
 
+// ── Existing routes (unchanged) ─────────────────────────────────────────
 router.post("/", authMiddleware, roleMiddleware("seller"), createListingController);
 router.get("/", getPublicListingsController);
 
@@ -34,5 +42,19 @@ router.put("/:id/hide", authMiddleware, roleMiddleware("admin"), hideListingCont
 router.put("/:id/unhide", authMiddleware, roleMiddleware("admin"), unhideListingController);
 
 router.get("/:slug", getListingBySlugController);
+
+// ── Media upload routes (new — S3 only) ────────────────────────────────
+// Thumbnail
+router.put("/:id/thumbnail",    authMiddleware, roleMiddleware("seller"), uploadThumbnailController);
+router.delete("/:id/thumbnail", authMiddleware, roleMiddleware("seller"), removeThumbnailController);
+
+// Gallery
+router.post("/:id/gallery",           authMiddleware, roleMiddleware("seller"), addGalleryImageController);
+router.delete("/:id/gallery/image",   authMiddleware, roleMiddleware("seller"), removeGalleryImageController);
+router.put("/:id/gallery/reorder",    authMiddleware, roleMiddleware("seller"), reorderGalleryController);
+
+// Media (Phase 11F) — demoVideo | documentation | setupGuide
+router.put("/:id/media/:mediaType",    authMiddleware, roleMiddleware("seller"), uploadListingMediaController);
+router.delete("/:id/media/:mediaType", authMiddleware, roleMiddleware("seller"), deleteListingMediaController);
 
 export default router;

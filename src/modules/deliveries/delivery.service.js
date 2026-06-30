@@ -165,6 +165,21 @@ export async function createOrderDelivery({ orderId, submittedBy, role, summaryN
     console.warn("Delivery timeline event failed", err);
   }
 
+  // Notify buyer that seller submitted a delivery
+  try {
+    const NotificationService = await import("../notifications/notification.service.js");
+    await NotificationService.createNotification({
+      userId: order.buyerId,
+      type: "order",
+      title: "Order delivered",
+      message: `Seller submitted a delivery for your order`,
+      referenceType: "order",
+      referenceId: order._id,
+    });
+  } catch (e) {
+    console.error("notify:createOrderDelivery:buyer", e?.message || e);
+  }
+
   return {
     delivery: created,
     latestDelivery: created,

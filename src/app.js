@@ -33,11 +33,33 @@ app.post("/api/orders/webhook", express.raw({ type: "application/json" }), strip
 // ============================================================
 // Large limit only for attachment uploads (base64 files). All other routes use 1mb.
 app.use((req, res, next) => {
+  // Attachment uploads (base64, up to 50 MB)
   if (req.method === "POST" && req.path === "/api/attachments") {
-    express.json({ limit: "50mb" })(req, res, next);
-  } else {
-    express.json({ limit: "1mb" })(req, res, next);
+    return express.json({ limit: "50mb" })(req, res, next);
   }
+  // Media uploads: avatar (5 MB), logo (5 MB), banner (8 MB) — send 15 MB ceiling
+  if (
+    (req.method === "PUT") &&
+    (
+      req.path === "/api/users/profile/avatar"  ||
+      req.path === "/api/users/profile/logo"    ||
+      req.path === "/api/users/profile/banner"
+    )
+  ) {
+    return express.json({ limit: "15mb" })(req, res, next);
+  }
+  // Listing media: thumbnail (8 MB), gallery images (10 MB) — 15 MB ceiling
+  if (
+    req.path.match(/^\/api\/listings\/[^/]+\/(thumbnail|gallery)$/) ||
+    req.path.match(/^\/api\/listings\/[^/]+\/gallery\/reorder$/)
+  ) {
+    return express.json({ limit: "15mb" })(req, res, next);
+  }
+  // Seller application documents: identity (10 MB), portfolio (25 MB), supporting (25 MB) — 30 MB ceiling
+  if (req.path.match(/^\/api\/seller-applications\/me\/documents\//)) {
+    return express.json({ limit: "30mb" })(req, res, next);
+  }
+  return express.json({ limit: "1mb" })(req, res, next);
 });
 app.use(express.urlencoded({ limit: "1mb", extended: true }));
 
